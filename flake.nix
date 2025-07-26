@@ -8,7 +8,10 @@
     in
     {
       devShells.x86_64-linux.default = pkgs.mkShellNoCC {
-        buildInputs = [ pkgs.gleam ];
+        packages = with pkgs; [
+          gleam
+          erlang_27
+        ];
       };
     };
 }
