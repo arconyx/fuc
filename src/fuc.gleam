@@ -26,7 +26,7 @@ type Context {
   /// If the website is on a nonstandard port, it should be included in the domain (URL encoded)
   /// Use the public facing domain and port as exposed by your reverse proxy
   /// `port` this process should listen on. May differ from the port included in the domain
-  /// `root_path` the server is mounted on with a leading and trailing `/`, e.g "/fuc/" for thehivemind.gay/fuc
+  /// `root_path` the server is mounted on with optional leading and trailing `/`, e.g "fuc" for thehivemind.gay/fuc
   Context(
     oauth_client: OAuthClient,
     domain: String,
@@ -101,6 +101,19 @@ fn load_environment() -> Result(Context, ContextError) {
       _, _ -> Error(ParsingError("Invalid root path '" <> path <> "'"))
     }
   })
+  // Strip leading and trailing /
+  // Then add them again, so we can be sure they exist
+  let root_path = case result.unwrap(get_env_var("FUC_ROOT_PATH"), "/") {
+    "/" -> ""
+    "/" <> p -> p
+    p -> p
+  }
+  let root_path = case string.last(root_path) {
+    Ok("/") -> string.drop_end(root_path, 1)
+    _ -> root_path
+    // We want same behaviour on error (empty string) as on no match
+  }
+  let root_path = "/" <> root_path <> "/"
 
   Context(client, domain, port, root_path) |> Ok
 }
