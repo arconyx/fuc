@@ -6,15 +6,44 @@ import gleam/httpc
 import gleam/int
 import gleam/json
 import gleam/list
+import gleam/otp/actor
 import gleam/result
 import gleam/string
 import gleam/string_tree
 import gleam/uri
+import sqlight
 
 import envoy
 import mist
 import wisp.{type Request, type Response}
 import wisp/wisp_mist
+
+pub fn main() {
+  wisp.configure_logger()
+
+  let server = {
+    use secret_key_base <- result.try(get_env_var("FUC_SECRET_KEY"))
+    use ctx <- result.try(load_environment())
+    use _ <- result.try(ctx.database_connection |> create_database())
+
+    route_request(_, ctx)
+    |> wisp_mist.handler(secret_key_base)
+    |> mist.new()
+    |> mist.bind("localhost")
+    |> mist.port(8000)
+    |> mist.start()
+    |> result.map_error(fn(e) { MistError(e) })
+  }
+
+  case server {
+    Ok(_) -> process.sleep_forever()
+    Error(e) -> {
+      wisp.log_critical("Unable to start server")
+      echo e
+      Nil
+    }
+  }
+}
 
 type OAuthClient {
   OAuthClient(id: String, secret: String)
@@ -27,45 +56,26 @@ type OAuthClient {
 /// e.g. https://thehivemind.gay:3000/fuq
 /// Use the public facing domain and port as exposed by your reverse proxy
 /// `port` this process should listen on. May differ from the port included in the address
+/// `database_path` points to an sqlite3 database
 type Context {
-  Context(oauth_client: OAuthClient, address: String, port: Int)
+  Context(
+    oauth_client: OAuthClient,
+    address: String,
+    port: Int,
+    database_connection: sqlight.Connection,
+  )
 }
 
-pub fn main() {
-  wisp.configure_logger()
-
-  // TODO: Store state on server so it is used across invocations
-  let secret_key_base = wisp.random_string(64)
-  let ctx = load_environment()
-
-  let server =
-    result.map(ctx, fn(ctx) {
-      route_request(_, ctx)
-      |> wisp_mist.handler(secret_key_base)
-      |> mist.new()
-      |> mist.bind("localhost")
-      |> mist.port(8000)
-      |> mist.start()
-    })
-
-  case server {
-    Ok(_) -> process.sleep_forever()
-    Error(e) -> {
-      wisp.log_critical("Unable to start server")
-      echo e
-      Nil
-    }
-  }
-}
-
-type ContextError {
+type StartupError {
   MissingVariable(key: String)
   ParsingError(value: String)
   Impossible(wtf: String)
+  DatabaseError(err: sqlight.Error)
+  MistError(err: actor.StartError)
 }
 
 /// Wrap envoy.get() with a more helpful error
-fn get_env_var(name: String) -> Result(String, ContextError) {
+fn get_env_var(name: String) -> Result(String, StartupError) {
   case envoy.get(name) {
     Ok("") -> Error(MissingVariable(name))
     Ok(val) -> Ok(val)
@@ -74,7 +84,7 @@ fn get_env_var(name: String) -> Result(String, ContextError) {
 }
 
 /// Init context, loading information from environment variables
-fn load_environment() -> Result(Context, ContextError) {
+fn load_environment() -> Result(Context, StartupError) {
   use id <- result.try(get_env_var("FUC_OAUTH_CLIENT_ID"))
   use secret <- result.try(get_env_var("FUC_OAUTH_CLIENT_SECRET"))
   let client = OAuthClient(id, secret)
@@ -98,7 +108,27 @@ fn load_environment() -> Result(Context, ContextError) {
   }
   use addr <- result.try(addr)
 
-  Context(client, addr, port) |> Ok
+  use database_path <- result.try(get_env_var("FUC_DATABASE_PATH"))
+  let conn =
+    sqlight.open(database_path)
+    |> result.map_error(fn(e) { DatabaseError(e) })
+
+  use conn <- result.try(conn)
+
+  Context(client, addr, port, conn) |> Ok
+}
+
+// TODO: Multi user support
+fn create_database(conn: sqlight.Connection) -> Result(Nil, StartupError) {
+  sqlight.exec(
+    "CREATE TABLE IF NOT EXISTS google_oauth_tokens (
+    id INTEGER PRIMARY KEY,
+    access TEXT UNIQUE NOT NULL,
+    refresh TEXT UNIQUE NOT NULL
+  )",
+    conn,
+  )
+  |> result.map_error(fn(e) { DatabaseError(e) })
 }
 
 /// Middleware to wrap requests and implement some generic handling for them
@@ -239,6 +269,17 @@ type OAuthToken {
   OAuthToken(access: String, refresh: String, token_type: String)
 }
 
+fn save_token(token: OAuthToken, ctx: Context) -> Result(Nil, sqlight.Error) {
+  {
+    "INSERT INTO google_auth_tokens (access, refresh) VALUES ("
+    <> token.access
+    <> ","
+    <> token.refresh
+    <> ")"
+  }
+  |> sqlight.exec(ctx.database_connection)
+}
+
 /// Exchange an authorization code for oauth tokens
 fn request_token(req: Request, ctx: Context) -> Result(OAuthToken, Nil) {
   let query = wisp.get_query(req)
@@ -318,6 +359,10 @@ fn google_auth_callback(req: Request, ctx: Context) -> Response {
       wisp.log_info("Login successful")
       // FOR DEBUGGING ONLY
       wisp.log_info(token.access)
+      case save_token(token, ctx) {
+        Ok(_) -> Nil
+        Error(_) -> wisp.log_error("Unable to save token")
+      }
     }
     Error(_) -> wisp.log_warning("Login failed")
   }

@@ -9,7 +9,7 @@
       pkgs = import nixpkgs { system = "x86_64-linux"; };
     in
     {
-      devShells.x86_64-linux.default = pkgs.mkShellNoCC {
+      devShells.x86_64-linux.default = pkgs.mkShell {
         packages = with pkgs; [
           gleam
           erlang_27
