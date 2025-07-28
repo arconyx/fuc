@@ -123,8 +123,7 @@ fn create_database(conn: sqlight.Connection) -> Result(Nil, StartupError) {
   sqlight.exec(
     "CREATE TABLE IF NOT EXISTS google_oauth_tokens (
     id INTEGER PRIMARY KEY,
-    access TEXT UNIQUE NOT NULL,
-    refresh TEXT UNIQUE NOT NULL
+    access TEXT UNIQUE NOT NULL
   )",
     conn,
   )
@@ -266,17 +265,12 @@ fn validate_state(req: Request, next: fn() -> Response) -> Response {
 
 type OAuthToken {
   // TODO: Record expiry times
-  OAuthToken(access: String, refresh: String, token_type: String)
+  OAuthToken(access: String, token_type: String)
 }
 
 fn save_token(token: OAuthToken, ctx: Context) -> Result(Nil, sqlight.Error) {
-  {
-    "INSERT INTO google_auth_tokens (access, refresh) VALUES ("
-    <> token.access
-    <> ","
-    <> token.refresh
-    <> ")"
-  }
+  // TODO: Rewrite in a way less prone to sql injection
+  { "INSERT INTO google_auth_tokens (access) VALUES (" <> token.access <> ")" }
   |> sqlight.exec(ctx.database_connection)
 }
 
@@ -297,7 +291,6 @@ fn request_token(req: Request, ctx: Context) -> Result(OAuthToken, Nil) {
     // Google should validate that they match
     <> "&redirect_uri="
     <> construct_callback_url(ctx)
-    <> "auth%2Fcallback"
 
   use token_req <- result.try(request.to("https://oauth2.googleapis.com/token"))
   let token_req =
@@ -320,6 +313,7 @@ fn request_token(req: Request, ctx: Context) -> Result(OAuthToken, Nil) {
         httpc.ResponseTimeout ->
           wisp.log_warning("Token request failed: timeout")
       }
+      echo e
       Error(Nil)
     }
   }
@@ -335,13 +329,12 @@ fn request_token(req: Request, ctx: Context) -> Result(OAuthToken, Nil) {
   use resp_body <- result.try(resp_body)
   let decoder = {
     use access_token <- decode.field("access_token", decode.string)
-    use refresh_token <- decode.field("refresh_token", decode.string)
     // Apparently always 'Bearer' atm
     use token_type <- decode.field("token_type", decode.string)
     // TODO: Parse expiry times
     // They're given in seconds from the current time so we'll have to calculate
     // the associated unix epoch
-    decode.success(OAuthToken(access_token, refresh_token, token_type))
+    decode.success(OAuthToken(access_token, token_type))
   }
   json.parse(resp_body, decoder)
   |> result.map_error(fn(_) {
@@ -354,6 +347,7 @@ fn google_auth_callback(req: Request, ctx: Context) -> Response {
   use <- wisp.require_method(req, http.Get)
   use <- validate_state(req)
 
+  // TODO: Make async with actor?
   case request_token(req, ctx) {
     Ok(token) -> {
       wisp.log_info("Login successful")
