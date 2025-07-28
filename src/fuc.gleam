@@ -1,8 +1,8 @@
 import gleam/dynamic/decode
 import gleam/erlang/process
+import gleam/hackney
 import gleam/http
 import gleam/http/request
-import gleam/httpc
 import gleam/int
 import gleam/json
 import gleam/list
@@ -270,7 +270,9 @@ type OAuthToken {
 
 fn save_token(token: OAuthToken, ctx: Context) -> Result(Nil, sqlight.Error) {
   // TODO: Rewrite in a way less prone to sql injection
-  { "INSERT INTO google_auth_tokens (access) VALUES (" <> token.access <> ")" }
+  {
+    "INSERT INTO google_oauth_tokens (access) VALUES ('" <> token.access <> "')"
+  }
   |> sqlight.exec(ctx.database_connection)
 }
 
@@ -302,18 +304,18 @@ fn request_token(req: Request, ctx: Context) -> Result(OAuthToken, Nil) {
 
   // Send token request
   // Replace the error type if we fail
-  let resp = case httpc.send(token_req) {
+  let resp = case hackney.send(token_req) {
     Ok(r) -> Ok(r)
     Error(e) -> {
       case e {
-        httpc.InvalidUtf8Response ->
+        hackney.InvalidUtf8Response ->
           wisp.log_warning("Token request failed: invalid utf-8 data")
-        httpc.FailedToConnect(_, _) ->
+        hackney.Other(e) -> {
           wisp.log_warning("Token request failed: unable to connect to host")
-        httpc.ResponseTimeout ->
-          wisp.log_warning("Token request failed: timeout")
+          echo e
+          Nil
+        }
       }
-      echo e
       Error(Nil)
     }
   }
@@ -351,11 +353,13 @@ fn google_auth_callback(req: Request, ctx: Context) -> Response {
   case request_token(req, ctx) {
     Ok(token) -> {
       wisp.log_info("Login successful")
-      // FOR DEBUGGING ONLY
-      wisp.log_info(token.access)
       case save_token(token, ctx) {
         Ok(_) -> Nil
-        Error(_) -> wisp.log_error("Unable to save token")
+        Error(e) -> {
+          wisp.log_error("Unable to save token")
+          echo e
+          Nil
+        }
       }
     }
     Error(_) -> wisp.log_warning("Login failed")
