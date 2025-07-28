@@ -9,6 +9,7 @@ import gleam/list
 import gleam/result
 import gleam/string
 import gleam/string_tree
+import gleam/uri
 
 import envoy
 import mist
@@ -19,20 +20,15 @@ type OAuthClient {
   OAuthClient(id: String, secret: String)
 }
 
+/// Context for server invocation
+/// `oauth_client` supplies the id and secret for Google OAuth
+/// `address` is the public facing address for the site, including protocol
+/// and port and subfolder (if necessary)
+/// e.g. https://thehivemind.gay:3000/fuq
+/// Use the public facing domain and port as exposed by your reverse proxy
+/// `port` this process should listen on. May differ from the port included in the address
 type Context {
-  /// Context for server invocation
-  /// `oauth_client` supplies the id and secret for Google OAuth
-  /// `domain` is the domain of the webserver, including any subdomain, e.g. "fuc.thehivemind.gay"
-  /// If the website is on a nonstandard port, it should be included in the domain (URL encoded)
-  /// Use the public facing domain and port as exposed by your reverse proxy
-  /// `port` this process should listen on. May differ from the port included in the domain
-  /// `root_path` the server is mounted on with optional leading and trailing `/`, e.g "fuc" for thehivemind.gay/fuc
-  Context(
-    oauth_client: OAuthClient,
-    domain: String,
-    port: Int,
-    root_path: String,
-  )
+  Context(oauth_client: OAuthClient, address: String, port: Int)
 }
 
 pub fn main() {
@@ -65,11 +61,13 @@ pub fn main() {
 type ContextError {
   MissingVariable(key: String)
   ParsingError(value: String)
+  Impossible(wtf: String)
 }
 
 /// Wrap envoy.get() with a more helpful error
 fn get_env_var(name: String) -> Result(String, ContextError) {
   case envoy.get(name) {
+    Ok("") -> Error(MissingVariable(name))
     Ok(val) -> Ok(val)
     Error(_) -> Error(MissingVariable(name))
   }
@@ -81,8 +79,6 @@ fn load_environment() -> Result(Context, ContextError) {
   use secret <- result.try(get_env_var("FUC_OAUTH_CLIENT_SECRET"))
   let client = OAuthClient(id, secret)
 
-  use domain <- result.try(get_env_var("FUC_DOMAIN"))
-
   use port_str <- result.try(get_env_var("FUC_PORT"))
   let port = case int.parse(port_str) {
     Ok(i) -> Ok(i)
@@ -90,32 +86,19 @@ fn load_environment() -> Result(Context, ContextError) {
   }
   use port <- result.try(port)
 
-  // Default path of `/` (i.e. directly on the domain root)
-  use root_path <- result.try({
-    let path = result.unwrap(get_env_var("FUC_ROOT_PATH"), "/")
-    case path, string.last(path) {
-      "/", Ok("/") -> Ok(path)
-      "/" <> _, Ok("/") -> Ok(path)
-      _, Ok(_) ->
-        Error(ParsingError("Root path must end with a / (got '" <> path <> "')"))
-      _, _ -> Error(ParsingError("Invalid root path '" <> path <> "'"))
-    }
-  })
-  // Strip leading and trailing /
-  // Then add them again, so we can be sure they exist
-  let root_path = case result.unwrap(get_env_var("FUC_ROOT_PATH"), "/") {
-    "/" -> ""
-    "/" <> p -> p
-    p -> p
+  // Get address, dropping any trailing /
+  use addr <- result.try(get_env_var("FUC_ADDRESS"))
+  let addr = case string.last(addr) {
+    Ok("/") -> Ok(string.drop_end(addr, 1))
+    Ok(_) -> Ok(addr)
+    Error(_) ->
+      Error(Impossible(
+        "Address is empty despite get_env_var validating it isn't",
+      ))
   }
-  let root_path = case string.last(root_path) {
-    Ok("/") -> string.drop_end(root_path, 1)
-    _ -> root_path
-    // We want same behaviour on error (empty string) as on no match
-  }
-  let root_path = "/" <> root_path <> "/"
+  use addr <- result.try(addr)
 
-  Context(client, domain, port, root_path) |> Ok
+  Context(client, addr, port) |> Ok
 }
 
 /// Middleware to wrap requests and implement some generic handling for them
@@ -197,6 +180,12 @@ fn start_google_login(req: Request, ctx: Context) -> Response {
   )
 }
 
+/// Returns the percent encoded URL used for OAuth redirect
+fn construct_callback_url(ctx: Context) -> String {
+  let full_address = ctx.address <> "/auth/callback"
+  uri.percent_encode(full_address)
+}
+
 fn construct_oauth_request(ctx: Context) -> OAuthRequest {
   // TODO: Split the state into client and server properties
   // Record the server value in the database and invalidate it after use
@@ -207,13 +196,8 @@ fn construct_oauth_request(ctx: Context) -> OAuthRequest {
     "https://accounts.google.com/o/oauth2/v2/auth?"
     <> "client_id="
     <> ctx.oauth_client.id
-    // TODO: Don't hardcode redirect_uri
-    // TODO: Make a function to generate this
-    // TODO: Use HTTPS when not on localhost
-    <> "&redirect_uri=http%3A%2F%2F"
-    <> ctx.domain
-    <> ctx.root_path
-    <> "auth%2Fcallback"
+    <> "&redirect_uri="
+    <> construct_callback_url(ctx)
     <> "&response_type=code"
     // Scopes are a space seperated list
     // Requested scopes: gmail.labels
@@ -270,11 +254,8 @@ fn request_token(req: Request, ctx: Context) -> Result(OAuthToken, Nil) {
     <> "&grant_type=authorization_code"
     // This needs to exactly match the earlier redirect uri
     // Google should validate that they match
-    // TODO: Make a function to generate this
-    // TODO: Use HTTPS when not on localhost
-    <> "&redirect_uri=http%3A%2F%2F"
-    <> ctx.domain
-    <> ctx.root_path
+    <> "&redirect_uri="
+    <> construct_callback_url(ctx)
     <> "auth%2Fcallback"
 
   use token_req <- result.try(request.to("https://oauth2.googleapis.com/token"))
