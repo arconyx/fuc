@@ -18,13 +18,17 @@ import mist
 import wisp.{type Request, type Response}
 import wisp/wisp_mist
 
+// ////////////// ENTRY POINT ///////////////
+
+/// Entry point
+/// Starts server
 pub fn main() {
   wisp.configure_logger()
 
   let server = {
+    use ctx <- result.try(load_context())
+    // There is no need for the secret key to be in the context
     use secret_key_base <- result.try(get_env_var("FUC_SECRET_KEY"))
-    use ctx <- result.try(load_environment())
-    use _ <- result.try(ctx.database_connection |> create_database())
 
     route_request(_, ctx)
     |> wisp_mist.handler(secret_key_base)
@@ -45,8 +49,15 @@ pub fn main() {
   }
 }
 
-type OAuthClient {
-  OAuthClient(id: String, secret: String)
+// /////////////// SERVER CONFIGURATION & STARTUP ///////////////////////
+
+/// Errors reported during context parsing and other parts of startup
+type StartupError {
+  MissingVariable(key: String)
+  ParsingError(value: String)
+  Impossible(wtf: String)
+  DatabaseError(err: sqlight.Error)
+  MistError(err: actor.StartError)
 }
 
 /// Context for server invocation
@@ -66,25 +77,17 @@ type Context {
   )
 }
 
-type StartupError {
-  MissingVariable(key: String)
-  ParsingError(value: String)
-  Impossible(wtf: String)
-  DatabaseError(err: sqlight.Error)
-  MistError(err: actor.StartError)
-}
-
-/// Wrap envoy.get() with a more helpful error
-fn get_env_var(name: String) -> Result(String, StartupError) {
-  case envoy.get(name) {
-    Ok("") -> Error(MissingVariable(name))
-    Ok(val) -> Ok(val)
-    Error(_) -> Error(MissingVariable(name))
-  }
+/// Basic abstraction for oauth client information
+type OAuthClient {
+  OAuthClient(id: String, secret: String)
 }
 
 /// Init context, loading information from environment variables
-fn load_environment() -> Result(Context, StartupError) {
+/// This calls create_database because it should be an error to have
+/// a context with an invalid database referenced.
+fn load_context() -> Result(Context, StartupError) {
+  // OAuth information gets a special type
+  // This is probably overkill tbh
   use id <- result.try(get_env_var("FUC_OAUTH_CLIENT_ID"))
   use secret <- result.try(get_env_var("FUC_OAUTH_CLIENT_SECRET"))
   let client = OAuthClient(id, secret)
@@ -96,7 +99,7 @@ fn load_environment() -> Result(Context, StartupError) {
   }
   use port <- result.try(port)
 
-  // Get address, dropping any trailing /
+  // We drop any trailing slashes from the address
   use addr <- result.try(get_env_var("FUC_ADDRESS"))
   let addr = case string.last(addr) {
     Ok("/") -> Ok(string.drop_end(addr, 1))
@@ -108,29 +111,58 @@ fn load_environment() -> Result(Context, StartupError) {
   }
   use addr <- result.try(addr)
 
+  // Create the database as soon as we know what it is called
   use database_path <- result.try(get_env_var("FUC_DATABASE_PATH"))
   let conn =
     sqlight.open(database_path)
     |> result.map_error(fn(e) { DatabaseError(e) })
-
+    |> result.try(create_database)
   use conn <- result.try(conn)
 
   Context(client, addr, port, conn) |> Ok
 }
 
-// TODO: Multi user support
-fn create_database(conn: sqlight.Connection) -> Result(Nil, StartupError) {
-  sqlight.exec(
-    "CREATE TABLE IF NOT EXISTS google_oauth_tokens (
+/// Get an environment variable
+/// Wraps envoy.get() with a more helpful error
+/// Empty environment variables are treated as an error
+fn get_env_var(name: String) -> Result(String, StartupError) {
+  case envoy.get(name) {
+    Ok("") -> Error(MissingVariable(name))
+    Ok(val) -> Ok(val)
+    Error(_) -> Error(MissingVariable(name))
+  }
+}
+
+// ////////////// DATABASE I/O ////////////////////////
+
+/// Init database with tables
+/// This must be idempotent because it may be
+/// called on existing databases
+fn create_database(
+  conn: sqlight.Connection,
+) -> Result(sqlight.Connection, StartupError) {
+  let create =
+    sqlight.exec(
+      "CREATE TABLE IF NOT EXISTS google_oauth_tokens (
     id INTEGER PRIMARY KEY,
     access TEXT UNIQUE NOT NULL
   )",
-    conn,
-  )
-  |> result.map_error(fn(e) { DatabaseError(e) })
+      conn,
+    )
+
+  case create {
+    Ok(Nil) -> Ok(conn)
+    Error(e) -> Error(DatabaseError(e))
+  }
 }
 
+// /////////// REQUEST HANDLING ///////////////
+
 /// Middleware to wrap requests and implement some generic handling for them
+/// - Method types are overriden if requested by caller
+/// - Requests are logged
+///  - Crashes return 500
+///  - HEAD requests are redirected to GET
 fn gracefully_wrap_requests(
   req: wisp.Request,
   handle_request: fn(wisp.Request) -> wisp.Response,
@@ -145,6 +177,8 @@ fn gracefully_wrap_requests(
   handle_request(req)
 }
 
+/// Method override allows changing message types when calling from the browser
+/// (we shouldn't need this - I think it only matters for JS?)
 /// Route requests to a handler
 fn route_request(req: Request, ctx: Context) -> Response {
   use req <- gracefully_wrap_requests(req)
@@ -159,8 +193,9 @@ fn route_request(req: Request, ctx: Context) -> Response {
   }
 }
 
-// Handle GET requests to `/`
-// Other methods will error
+// ////////// ENDPOINTS ////////////////////////
+
+// Handle GET requests to the site root
 fn home_page(req: Request, _ctx: Context) -> Response {
   use <- wisp.require_method(req, http.Get)
 
@@ -170,12 +205,7 @@ fn home_page(req: Request, _ctx: Context) -> Response {
   |> wisp.html_body(body)
 }
 
-type OAuthRequest {
-  OAuthRequest(url: String, state: String)
-}
-
 /// Landing page to prompt for user auth
-/// Handles GET only
 fn login_page(req: Request, _ctx: Context) -> Response {
   use <- wisp.require_method(req, http.Get)
 
@@ -186,8 +216,9 @@ fn login_page(req: Request, _ctx: Context) -> Response {
   |> wisp.html_body(body)
 }
 
+// /////////// OAUTH HANDLING /////////////////
+
 /// Redirect to Google's OAuth login page
-/// Accepts GET only
 fn start_google_login(req: Request, ctx: Context) -> Response {
   use <- wisp.require_method(req, http.Get)
   let auth_request = construct_oauth_request(ctx)
@@ -209,12 +240,20 @@ fn start_google_login(req: Request, ctx: Context) -> Response {
   )
 }
 
+/// Encapsulate oauth request metadata
+/// The state needs to be in the url and stored seperately
+type OAuthRequest {
+  OAuthRequest(url: String, state: String)
+}
+
 /// Returns the percent encoded URL used for OAuth redirect
 fn construct_callback_url(ctx: Context) -> String {
   let full_address = ctx.address <> "/auth/callback"
   uri.percent_encode(full_address)
 }
 
+/// Generate an OAuth request with random state and nonce
+/// using the appropriate callback url for the server configuration
 fn construct_oauth_request(ctx: Context) -> OAuthRequest {
   // TODO: Split the state into client and server properties
   // Record the server value in the database and invalidate it after use
@@ -263,6 +302,7 @@ fn validate_state(req: Request, next: fn() -> Response) -> Response {
   }
 }
 
+/// Store the data recieved
 type OAuthToken {
   // TODO: Record expiry times
   OAuthToken(access: String, token_type: String)
@@ -278,9 +318,14 @@ fn save_token(token: OAuthToken, ctx: Context) -> Result(Nil, sqlight.Error) {
 
 /// Exchange an authorization code for oauth tokens
 fn request_token(req: Request, ctx: Context) -> Result(OAuthToken, Nil) {
+  // Extract authorization code from query string
   let query = wisp.get_query(req)
   use code <- result.try(list.key_find(query, "code"))
 
+  // Prepare request for access token
+  // This is a POST with a url encoded form body
+  // The reponse body is JSON
+  // Maybe the req body can be json too, but the form works fine
   let body =
     "client_id="
     <> ctx.oauth_client.id
@@ -293,7 +338,6 @@ fn request_token(req: Request, ctx: Context) -> Result(OAuthToken, Nil) {
     // Google should validate that they match
     <> "&redirect_uri="
     <> construct_callback_url(ctx)
-
   use token_req <- result.try(request.to("https://oauth2.googleapis.com/token"))
   let token_req =
     token_req
@@ -319,8 +363,10 @@ fn request_token(req: Request, ctx: Context) -> Result(OAuthToken, Nil) {
       Error(Nil)
     }
   }
-
   use resp <- result.try(resp)
+
+  // Parse the response body and extract the access token
+  // Return the token as an OAuthToken result
   let resp_body = case resp.status {
     200 -> Ok(resp.body)
     status -> {
@@ -336,7 +382,15 @@ fn request_token(req: Request, ctx: Context) -> Result(OAuthToken, Nil) {
     // TODO: Parse expiry times
     // They're given in seconds from the current time so we'll have to calculate
     // the associated unix epoch
-    decode.success(OAuthToken(access_token, token_type))
+    case string.lowercase(token_type) {
+      "bearer" -> decode.success(OAuthToken(access_token, token_type))
+      t -> {
+        wisp.log_error(
+          "Got unknown token type '" <> t <> "' instead of 'Bearer'",
+        )
+        decode.failure(OAuthToken(access_token, token_type), "token_type")
+      }
+    }
   }
   json.parse(resp_body, decoder)
   |> result.map_error(fn(_) {
@@ -345,6 +399,8 @@ fn request_token(req: Request, ctx: Context) -> Result(OAuthToken, Nil) {
   })
 }
 
+/// This is the page Google redirects a user to on login
+/// We validate the state to try and avoid CSRF
 fn google_auth_callback(req: Request, ctx: Context) -> Response {
   use <- wisp.require_method(req, http.Get)
   use <- validate_state(req)
