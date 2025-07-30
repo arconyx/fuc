@@ -9,13 +9,15 @@ import gleam/list
 import gleam/result
 import gleam/string
 import gleam/string_tree
+import gleam/time/duration
+import gleam/time/timestamp
 import gleam/uri
 
 import mist
 import wisp.{type Request, type Response}
 import wisp/wisp_mist
 
-import state.{type Context, type OAuthRequest, type OAuthToken}
+import state.{type Context, type OAuthToken}
 
 // ////////////// ENTRY POINT ///////////////
 
@@ -127,24 +129,38 @@ fn login_page(req: Request, _ctx: Context) -> Response {
 /// Redirect to Google's OAuth login page
 fn start_google_login(req: Request, ctx: Context) -> Response {
   use <- wisp.require_method(req, http.Get)
-  let auth_request = construct_oauth_request(ctx)
-  case state.save_state(auth_request, ctx) {
+  let lifespan = 5 * 60
+  let st =
+    state.OAuthStateToken(
+      wisp.random_string(128),
+      timestamp.system_time() |> timestamp.add(duration.seconds(lifespan)),
+    )
+  case state.insert_state_token(st, ctx) {
     Ok(Nil) -> {
+      let url =
+        "https://accounts.google.com/o/oauth2/v2/auth?"
+        <> "client_id="
+        <> ctx.oauth_client.id
+        <> "&redirect_uri="
+        <> construct_callback_url(ctx)
+        <> "&response_type=code"
+        // Scopes are a space seperated list
+        // Requested scopes: gmail.labels
+        <> "&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.labels"
+        <> "&access_type=online"
+        <> "&state="
+        <> st.token
+        <> "&nonce="
+        <> wisp.random_string(64)
       // This uses a 303 redirect, which appears to be what is recommended for openid
       // https://openid.net/specs/openid-connect-core-1_0.html#HTTP307Redirects
-      wisp.redirect(auth_request.url)
+      wisp.redirect(url)
       // I've checked the wisp source.
       // It uses the gleam/http/cookie defaults which include HttpOnly = true and SameSite = Lax
       // which seems about what we want.
       // Five minute timeout is trying to strike a balance between not lingering and
       // not expiring if the user takes a while to login
-      |> wisp.set_cookie(
-        req,
-        "oauth_state",
-        auth_request.state,
-        wisp.Signed,
-        5 * 60,
-      )
+      |> wisp.set_cookie(req, "oauth_state", st.token, wisp.Signed, lifespan)
     }
     Error(e) -> {
       wisp.log_error("Unable to save state")
@@ -158,33 +174,6 @@ fn start_google_login(req: Request, ctx: Context) -> Response {
 fn construct_callback_url(ctx: Context) -> String {
   let full_address = ctx.address <> "/auth/callback"
   uri.percent_encode(full_address)
-}
-
-/// Generate an OAuth request with random state and nonce
-/// using the appropriate callback url for the server configuration
-fn construct_oauth_request(ctx: Context) -> OAuthRequest {
-  // TODO: Split the state into client and server properties
-  // Record the server value in the database and invalidate it after use
-  // Wait, is there any point? It has to be passed to the client in the request
-  // Ah, we can use the hash in the request
-  let state = wisp.random_string(128)
-  let url =
-    "https://accounts.google.com/o/oauth2/v2/auth?"
-    <> "client_id="
-    <> ctx.oauth_client.id
-    <> "&redirect_uri="
-    <> construct_callback_url(ctx)
-    <> "&response_type=code"
-    // Scopes are a space seperated list
-    // Requested scopes: gmail.labels
-    <> "&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.labels"
-    <> "&access_type=online"
-    <> "&state="
-    <> state
-    <> "&nonce="
-    <> wisp.random_string(64)
-
-  state.OAuthRequest(url, state)
 }
 
 /// Middleware that asserts that the request has valid oauth state
@@ -303,7 +292,7 @@ fn google_auth_callback(req: Request, ctx: Context) -> Response {
   case request_token(req, ctx) {
     Ok(token) -> {
       wisp.log_info("Login successful")
-      case state.save_token(token, ctx) {
+      case state.insert_access_token(token, ctx) {
         Ok(_) -> Nil
         Error(e) -> {
           wisp.log_error("Unable to save token")

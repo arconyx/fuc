@@ -1,11 +1,12 @@
+import envoy
+import gleam/float
 import gleam/int
 import gleam/result
 import gleam/string
+import gleam/time/timestamp.{type Timestamp}
 import sqlight
 
-import envoy
-
-// /////////////// SERVER CONFIGURATION & STARTUP ///////////////////////
+// /////////////// SERVER CONFIGURATION ///////////////////////
 
 /// Errors reported during context parsing and other parts of startup
 pub type ContextError {
@@ -96,58 +97,86 @@ pub fn get_env_var(name: String) -> Result(String, ContextError) {
 fn create_database(
   conn: sqlight.Connection,
 ) -> Result(sqlight.Connection, ContextError) {
-  use conn <- result.try(
-    create_table(conn, "google_oauth_tokens", [
-      "id INTEGER PRIMARY KEY", "access TEXT UNIQUE NOT NULL",
-    ]),
-  )
-  use conn <- result.try(
-    create_table(conn, "google_oauth_state", [
-      "id INTEGER PRIMARY KEY", "state TEXT UNIQUE NOT NULL",
-    ]),
-  )
-  Ok(conn)
+  {
+    use conn <- result.try(create_table_access_tokens(conn))
+    use conn <- result.try(create_table_state_tokens(conn))
+    Ok(conn)
+  }
+  |> result.map_error(fn(e) { DatabaseError(e) })
 }
 
+/// Wrapper for creating a table from a list of columns
 fn create_table(
   conn: sqlight.Connection,
   name: String,
   cols: List(String),
-) -> Result(sqlight.Connection, ContextError) {
-  let create =
-    sqlight.exec(
-      "CREATE TABLE IF NOT EXISTS"
-        <> name
-        <> "("
-        <> string.join(cols, ",")
-        <> ")",
-      conn,
-    )
+) -> Result(sqlight.Connection, sqlight.Error) {
+  sqlight.exec(
+    "CREATE TABLE IF NOT EXISTS" <> name <> "(" <> string.join(cols, ",") <> ")",
+    conn,
+  )
+  |> result.map(fn(_) { conn })
+}
 
-  case create {
-    Ok(Nil) -> Ok(conn)
-    Error(e) -> Error(DatabaseError(e))
+// OAUTH STATE TOKEN
+// Random string stored on client and server and passed with request
+// We check the state token in auth callbacks against the saved values
+// to ensure it is tied to a auth flow we started
+
+pub type OAuthStateToken {
+  OAuthStateToken(token: String, expires_at: Timestamp)
+}
+
+/// Create the table used to store state tokens
+fn create_table_state_tokens(
+  conn: sqlight.Connection,
+) -> Result(sqlight.Connection, sqlight.Error) {
+  create_table(conn, "google_oauth_state", [
+    "id INTEGER PRIMARY KEY", "state TEXT UNIQUE NOT NULL",
+    "expires_at INTEGER NOT NULL",
+  ])
+}
+
+/// Insert request state token into database
+pub fn insert_state_token(
+  state: OAuthStateToken,
+  ctx: Context,
+) -> Result(Nil, sqlight.Error) {
+  {
+    "INSERT INTO google_oauth_state (state) VALUES ('"
+    <> state.token
+    <> "',"
+    <> {
+      state.expires_at
+      |> timestamp.to_unix_seconds()
+      |> float.truncate()
+      |> int.to_string()
+    }
+    <> ")"
   }
-}
-
-/// Encapsulate oauth request metadata
-/// The state needs to be in the url and stored seperately
-pub type OAuthRequest {
-  OAuthRequest(url: String, state: String)
-}
-
-pub fn save_state(req: OAuthRequest, ctx: Context) -> Result(Nil, sqlight.Error) {
-  { "INSERT INTO google_oauth_state (state) VALUES ('" <> req.state <> "')" }
   |> sqlight.exec(ctx.database_connection)
 }
 
-/// Store the data recieved
+/// OAUTH ACCESS TOKEN
+/// Returned by the oauth flow, gives api access
 pub type OAuthToken {
   // TODO: Record expiry times
   OAuthToken(access: String, token_type: String)
 }
 
-pub fn save_token(token: OAuthToken, ctx: Context) -> Result(Nil, sqlight.Error) {
+/// 
+fn create_table_access_tokens(
+  conn: sqlight.Connection,
+) -> Result(sqlight.Connection, sqlight.Error) {
+  create_table(conn, "google_oauth_tokens", [
+    "id INTEGER PRIMARY KEY", "access TEXT UNIQUE NOT NULL",
+  ])
+}
+
+pub fn insert_access_token(
+  token: OAuthToken,
+  ctx: Context,
+) -> Result(Nil, sqlight.Error) {
   // TODO: Rewrite in a way less prone to sql injection
   {
     "INSERT INTO google_oauth_tokens (access) VALUES ('" <> token.access <> "')"
