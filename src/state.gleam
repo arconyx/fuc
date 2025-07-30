@@ -1,6 +1,7 @@
 import envoy
 import gleam/float
 import gleam/int
+import gleam/option.{type Option}
 import gleam/result
 import gleam/string
 import gleam/time/timestamp.{type Timestamp}
@@ -13,7 +14,7 @@ pub type ContextError {
   MissingVariable(key: String)
   ParsingError(value: String)
   Impossible(wtf: String)
-  DatabaseError(err: sqlight.Error)
+  DatabaseInitError(err: sqlight.Error)
 }
 
 /// Context for server invocation
@@ -71,7 +72,7 @@ pub fn load_context() -> Result(Context, ContextError) {
   use database_path <- result.try(get_env_var("FUC_DATABASE_PATH"))
   let conn =
     sqlight.open(database_path)
-    |> result.map_error(fn(e) { DatabaseError(e) })
+    |> result.map_error(fn(e) { DatabaseInitError(e) })
     |> result.try(create_database)
   use conn <- result.try(conn)
 
@@ -102,7 +103,7 @@ fn create_database(
     use conn <- result.try(create_table_state_tokens(conn))
     Ok(conn)
   }
-  |> result.map_error(fn(e) { DatabaseError(e) })
+  |> result.map_error(fn(e) { DatabaseInitError(e) })
 }
 
 /// Wrapper for creating a table from a list of columns
@@ -118,13 +119,22 @@ fn create_table(
   |> result.map(fn(_) { conn })
 }
 
+/// General error type for database stuff
+pub type DatabaseError {
+  // For types that don't correspond to a database row, like PendingStateToken
+  NotARow
+  // Generic SQLite erros
+  SQLError(err: sqlight.Error)
+}
+
 // OAUTH STATE TOKEN
 // Random string stored on client and server and passed with request
 // We check the state token in auth callbacks against the saved values
 // to ensure it is tied to a auth flow we started
 
 pub type OAuthStateToken {
-  OAuthStateToken(token: String, expires_at: Timestamp)
+  PendingStateToken(token: String, expires_at: Timestamp)
+  StateTokenRow(token: String, expires_at: Timestamp, id: Int)
 }
 
 /// Create the table used to store state tokens
@@ -157,6 +167,26 @@ pub fn insert_state_token(
   |> sqlight.exec(ctx.database_connection)
 }
 
+/// Return state with matching token from database, if it exists
+/// This MUST only return Some value iff the token value for the row
+///  exactly matches the supplied token argument.
+pub fn select_state_token(
+  token: String,
+  ctx: Context,
+) -> Option(OAuthStateToken) {
+  todo
+}
+
+pub fn delete_state_token(
+  token: OAuthStateToken,
+  ctx: Context,
+) -> Result(Nil, DatabaseError) {
+  case token {
+    PendingStateToken(_, _) -> Error(NotARow)
+    StateTokenRow(_, _, id) -> todo
+  }
+}
+
 /// OAUTH ACCESS TOKEN
 /// Returned by the oauth flow, gives api access
 pub type OAuthToken {
@@ -164,7 +194,7 @@ pub type OAuthToken {
   OAuthToken(access: String, token_type: String)
 }
 
-/// 
+/// Create table for storing oauth access tokens
 fn create_table_access_tokens(
   conn: sqlight.Connection,
 ) -> Result(sqlight.Connection, sqlight.Error) {
@@ -173,6 +203,7 @@ fn create_table_access_tokens(
   ])
 }
 
+/// Insert access token into database
 pub fn insert_access_token(
   token: OAuthToken,
   ctx: Context,

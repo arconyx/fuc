@@ -6,13 +6,14 @@ import gleam/http/request
 import gleam/int
 import gleam/json
 import gleam/list
+import gleam/option.{None, Some}
+import gleam/order
 import gleam/result
 import gleam/string
 import gleam/string_tree
 import gleam/time/duration
 import gleam/time/timestamp
 import gleam/uri
-
 import mist
 import wisp.{type Request, type Response}
 import wisp/wisp_mist
@@ -131,7 +132,7 @@ fn start_google_login(req: Request, ctx: Context) -> Response {
   use <- wisp.require_method(req, http.Get)
   let lifespan = 5 * 60
   let st =
-    state.OAuthStateToken(
+    state.PendingStateToken(
       wisp.random_string(128),
       timestamp.system_time() |> timestamp.add(duration.seconds(lifespan)),
     )
@@ -177,23 +178,53 @@ fn construct_callback_url(ctx: Context) -> String {
 }
 
 /// Middleware that asserts that the request has valid oauth state
-fn validate_state(req: Request, next: fn() -> Response) -> Response {
+fn validate_state(
+  req: Request,
+  ctx: Context,
+  next: fn() -> Response,
+) -> Response {
   let query = wisp.get_query(req)
   // Validate the state token matches the signed value on the client
-  // TODO: Expire state cookie
   let state = {
-    use remote <- result.try(list.key_find(query, "state"))
-    use client <- result.try(wisp.get_cookie(req, "oauth_state", wisp.Signed))
+    use remote <- result.try(
+      list.key_find(query, "state")
+      |> result.map_error(fn(_) { "State missing from query string" }),
+    )
+    use client <- result.try(
+      wisp.get_cookie(req, "oauth_state", wisp.Signed)
+      |> result.map_error(fn(_) { "State cookie not found or invalid" }),
+    )
     case client == remote {
-      True -> Ok(True)
-      False -> Error(Nil)
+      True -> {
+        let now = timestamp.system_time()
+        case state.select_state_token(client, ctx) {
+          Some(st) -> {
+            // We don't need to check that st.token == client == remote
+            // because it is enforced by state.select_state_token()
+            case timestamp.compare(now, st.expires_at) {
+              order.Lt -> {
+                case state.delete_state_token(st, ctx) {
+                  Error(e) ->
+                    Ok(wisp.log_warning(
+                      "Unable to delete used state token: " <> string.inspect(e),
+                    ))
+                  Ok(Nil) -> Ok(Nil)
+                }
+              }
+              _ -> Error("State has expired")
+            }
+          }
+          None -> Error("State not in database")
+        }
+      }
+      False -> Error("Client and remote states do not match")
     }
   }
 
   case state {
     Ok(_) -> next()
-    Error(_) -> {
-      wisp.log_warning("State validation failed")
+    Error(e) -> {
+      wisp.log_warning("State validation failed: " <> e)
       wisp.bad_request()
     }
   }
@@ -286,7 +317,7 @@ fn request_token(req: Request, ctx: Context) -> Result(OAuthToken, Nil) {
 /// We validate the state to try and avoid CSRF
 fn google_auth_callback(req: Request, ctx: Context) -> Response {
   use <- wisp.require_method(req, http.Get)
-  use <- validate_state(req)
+  use <- validate_state(req, ctx)
 
   // TODO: Make async with actor?
   case request_token(req, ctx) {
