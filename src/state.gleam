@@ -1,11 +1,19 @@
+import cake/adapter/sqlite
+import cake/delete
+import cake/insert
+import cake/select
+import cake/where
 import envoy
+import gleam/dynamic/decode
 import gleam/float
 import gleam/int
-import gleam/option.{type Option}
+import gleam/list
+import gleam/option.{type Option, None}
 import gleam/result
 import gleam/string
 import gleam/time/timestamp.{type Timestamp}
 import sqlight
+import wisp
 
 // /////////////// SERVER CONFIGURATION ///////////////////////
 
@@ -113,7 +121,11 @@ fn create_table(
   cols: List(String),
 ) -> Result(sqlight.Connection, sqlight.Error) {
   sqlight.exec(
-    "CREATE TABLE IF NOT EXISTS" <> name <> "(" <> string.join(cols, ",") <> ")",
+    "CREATE TABLE IF NOT EXISTS "
+      <> name
+      <> "("
+      <> string.join(cols, ",")
+      <> ")",
     conn,
   )
   |> result.map(fn(_) { conn })
@@ -132,16 +144,26 @@ pub type DatabaseError {
 // We check the state token in auth callbacks against the saved values
 // to ensure it is tied to a auth flow we started
 
+const table_oauth_state = "google_oauth_state"
+
 pub type OAuthStateToken {
   PendingStateToken(token: String, expires_at: Timestamp)
   StateTokenRow(token: String, expires_at: Timestamp, id: Int)
+}
+
+fn oauth_state_from_sql() -> decode.Decoder(OAuthStateToken) {
+  use id <- decode.field(0, decode.int)
+  use token <- decode.field(1, decode.string)
+  use expiry <- decode.field(2, decode.int)
+  StateTokenRow(token:, expires_at: timestamp.from_unix_seconds(expiry), id:)
+  |> decode.success()
 }
 
 /// Create the table used to store state tokens
 fn create_table_state_tokens(
   conn: sqlight.Connection,
 ) -> Result(sqlight.Connection, sqlight.Error) {
-  create_table(conn, "google_oauth_state", [
+  create_table(conn, table_oauth_state, [
     "id INTEGER PRIMARY KEY", "state TEXT UNIQUE NOT NULL",
     "expires_at INTEGER NOT NULL",
   ])
@@ -151,20 +173,22 @@ fn create_table_state_tokens(
 pub fn insert_state_token(
   state: OAuthStateToken,
   ctx: Context,
-) -> Result(Nil, sqlight.Error) {
-  {
-    "INSERT INTO google_oauth_state (state) VALUES ('"
-    <> state.token
-    <> "',"
-    <> {
-      state.expires_at
-      |> timestamp.to_unix_seconds()
-      |> float.truncate()
-      |> int.to_string()
-    }
-    <> ")"
-  }
-  |> sqlight.exec(ctx.database_connection)
+) -> Result(List(OAuthStateToken), sqlight.Error) {
+  [
+    [
+      insert.string(state.token),
+      insert.int(
+        state.expires_at |> timestamp.to_unix_seconds |> float.truncate,
+      ),
+    ]
+    |> insert.row,
+  ]
+  |> insert.from_values(table_name: table_oauth_state, columns: [
+    "state", "expires_at",
+  ])
+  |> insert.returning(["id", "state", "expires_at"])
+  |> insert.to_query
+  |> sqlite.run_write_query(oauth_state_from_sql(), ctx.database_connection)
 }
 
 /// Return state with matching token from database, if it exists
@@ -174,16 +198,40 @@ pub fn select_state_token(
   token: String,
   ctx: Context,
 ) -> Option(OAuthStateToken) {
-  todo
+  let q =
+    select.new()
+    |> select.select_cols(["id", "state", "expires_at"])
+    |> select.from_table(table_oauth_state)
+    |> select.where(where.col("state") |> where.eq(where.string(token)))
+    |> select.to_query
+    |> sqlite.run_read_query(oauth_state_from_sql(), ctx.database_connection)
+
+  case q {
+    Error(e) -> {
+      wisp.log_warning("Unable to fetch state token: " <> string.inspect(e))
+      None
+    }
+    Ok(v) -> list.first(v) |> option.from_result
+  }
 }
 
+/// Delete state token from database based on id
 pub fn delete_state_token(
   token: OAuthStateToken,
   ctx: Context,
 ) -> Result(Nil, DatabaseError) {
   case token {
     PendingStateToken(_, _) -> Error(NotARow)
-    StateTokenRow(_, _, id) -> todo
+    StateTokenRow(_, _, id) -> {
+      delete.new()
+      |> delete.where(where.col("id") |> where.eq(where.int(id)))
+      |> delete.table(table_oauth_state)
+      |> delete.no_returning
+      |> delete.to_query
+      |> sqlite.run_write_query(oauth_state_from_sql(), ctx.database_connection)
+      |> result.replace(Nil)
+      |> result.map_error(fn(e) { SQLError(e) })
+    }
   }
 }
 
@@ -191,14 +239,25 @@ pub fn delete_state_token(
 /// Returned by the oauth flow, gives api access
 pub type OAuthToken {
   // TODO: Record expiry times
-  OAuthToken(access: String, token_type: String)
+  PendingOAuthToken(access: String, token_type: String)
+  OAuthTokenRow(access: String, token_type: String, id: Int)
+}
+
+const table_oauth_tokens = "google_oauth_tokens"
+
+fn oauth_token_from_sql() -> decode.Decoder(OAuthToken) {
+  use id <- decode.field(0, decode.int)
+  use access <- decode.field(1, decode.string)
+  // TODO: Maybe we shouldn't hardcode bearer
+  OAuthTokenRow(access, "Bearer", id:)
+  |> decode.success()
 }
 
 /// Create table for storing oauth access tokens
 fn create_table_access_tokens(
   conn: sqlight.Connection,
 ) -> Result(sqlight.Connection, sqlight.Error) {
-  create_table(conn, "google_oauth_tokens", [
+  create_table(conn, table_oauth_tokens, [
     "id INTEGER PRIMARY KEY", "access TEXT UNIQUE NOT NULL",
   ])
 }
@@ -207,10 +266,31 @@ fn create_table_access_tokens(
 pub fn insert_access_token(
   token: OAuthToken,
   ctx: Context,
-) -> Result(Nil, sqlight.Error) {
+) -> Result(List(OAuthToken), sqlight.Error) {
   // TODO: Rewrite in a way less prone to sql injection
-  {
-    "INSERT INTO google_oauth_tokens (access) VALUES ('" <> token.access <> "')"
+  [[insert.string(token.access)] |> insert.row]
+  |> insert.from_values(table_name: table_oauth_tokens, columns: ["access"])
+  |> insert.returning(["id", "access"])
+  |> insert.to_query()
+  |> sqlite.run_write_query(oauth_token_from_sql(), ctx.database_connection)
+}
+
+/// Get latest access token
+pub fn get_access_token(ctx: Context) -> Option(OAuthToken) {
+  let s =
+    select.new()
+    |> select.select_cols(["id", "access"])
+    |> select.from_table(table_oauth_tokens)
+    |> select.order_by_desc("id")
+    // hack for latest
+    |> select.limit(1)
+    |> select.to_query
+    |> sqlite.run_read_query(oauth_token_from_sql(), ctx.database_connection)
+  case s {
+    Error(e) -> {
+      wisp.log_warning("Unable to get access token: " <> string.inspect(e))
+      None
+    }
+    Ok(v) -> list.first(v) |> option.from_result
   }
-  |> sqlight.exec(ctx.database_connection)
 }

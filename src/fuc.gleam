@@ -31,6 +31,8 @@ pub fn main() {
   // There is no need for the secret key to be in the context
   let secret_key_base = state.get_env_var("FUC_SECRET_KEY")
 
+  wisp.log_info("Context loaded")
+
   case ctx, secret_key_base {
     Ok(ctx), Ok(secret_key_base) -> {
       let server =
@@ -63,6 +65,10 @@ pub fn main() {
       )
     }
   }
+
+  wisp.log_info("Stopping...")
+  process.sleep(500)
+  // give logging a chance to finish
 }
 
 // /////////// REQUEST HANDLING ///////////////
@@ -137,7 +143,7 @@ fn start_google_login(req: Request, ctx: Context) -> Response {
       timestamp.system_time() |> timestamp.add(duration.seconds(lifespan)),
     )
   case state.insert_state_token(st, ctx) {
-    Ok(Nil) -> {
+    Ok(_) -> {
       let url =
         "https://accounts.google.com/o/oauth2/v2/auth?"
         <> "client_id="
@@ -297,12 +303,16 @@ fn request_token(req: Request, ctx: Context) -> Result(OAuthToken, Nil) {
     // They're given in seconds from the current time so we'll have to calculate
     // the associated unix epoch
     case string.lowercase(token_type) {
-      "bearer" -> decode.success(state.OAuthToken(access_token, token_type))
+      "bearer" ->
+        decode.success(state.PendingOAuthToken(access_token, token_type))
       t -> {
         wisp.log_error(
           "Got unknown token type '" <> t <> "' instead of 'Bearer'",
         )
-        decode.failure(state.OAuthToken(access_token, token_type), "token_type")
+        decode.failure(
+          state.PendingOAuthToken(access_token, token_type),
+          "token_type",
+        )
       }
     }
   }

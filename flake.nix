@@ -14,6 +14,7 @@
           gleam
           erlang_27
           beam27Packages.rebar3
+          litecli
         ];
       };
     };
