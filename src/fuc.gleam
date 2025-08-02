@@ -121,11 +121,13 @@ fn home_page(req: Request, _ctx: Context) -> Response {
 }
 
 /// Landing page to prompt for user auth
-fn login_page(req: Request, _ctx: Context) -> Response {
+fn login_page(req: Request, ctx: Context) -> Response {
   use <- wisp.require_method(req, http.Get)
 
   let body =
-    string_tree.from_string("<a href='/auth/google'>Login with Google</a>")
+    string_tree.from_string(
+      "<a href='" <> ctx.address <> "/auth/google'>Login with Google</a>",
+    )
 
   wisp.ok()
   |> wisp.html_body(body)
@@ -142,7 +144,7 @@ fn start_google_login(req: Request, ctx: Context) -> Response {
       wisp.random_string(128),
       timestamp.system_time() |> timestamp.add(duration.seconds(lifespan)),
     )
-  case state.insert_state_token(st, ctx) {
+  case state.insert_state_token(st, ctx.database_connection) {
     Ok(_) -> {
       let url =
         "https://accounts.google.com/o/oauth2/v2/auth?"
@@ -153,7 +155,8 @@ fn start_google_login(req: Request, ctx: Context) -> Response {
         <> "&response_type=code"
         // Scopes are a space seperated list
         // Requested scopes: gmail.labels
-        <> "&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.labels"
+        <> "&scope="
+        <> uri.percent_encode("https://www.googleapis.com/auth/gmail.readonly")
         <> "&access_type=online"
         <> "&state="
         <> st.token
@@ -203,13 +206,13 @@ fn validate_state(
     case client == remote {
       True -> {
         let now = timestamp.system_time()
-        case state.select_state_token(client, ctx) {
+        case state.select_state_token(client, ctx.database_connection) {
           Some(st) -> {
             // We don't need to check that st.token == client == remote
             // because it is enforced by state.select_state_token()
             case timestamp.compare(now, st.expires_at) {
               order.Lt -> {
-                case state.delete_state_token(st, ctx) {
+                case state.delete_state_token(st, ctx.database_connection) {
                   Error(e) ->
                     Ok(wisp.log_warning(
                       "Unable to delete used state token: " <> string.inspect(e),
@@ -333,7 +336,7 @@ fn google_auth_callback(req: Request, ctx: Context) -> Response {
   case request_token(req, ctx) {
     Ok(token) -> {
       wisp.log_info("Login successful")
-      case state.insert_access_token(token, ctx) {
+      case state.insert_access_token(token, ctx.database_connection) {
         Ok(_) -> Nil
         Error(e) -> {
           wisp.log_error("Unable to save token")
@@ -345,4 +348,13 @@ fn google_auth_callback(req: Request, ctx: Context) -> Response {
     Error(_) -> wisp.log_warning("Login failed")
   }
   wisp.redirect("/")
+}
+
+/// Middleware to grab access token before making requests
+fn with_access_token(ctx: Context, next: fn(OAuthToken) -> Response) -> Response {
+  case state.get_access_token(ctx.database_connection) {
+    Some(token) -> next(token)
+    None -> wisp.redirect(ctx.address <> "/auth/google")
+  }
+  // TODO: Validate token hasn't expired
 }

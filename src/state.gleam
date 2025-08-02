@@ -5,6 +5,7 @@ import cake/select
 import cake/where
 import envoy
 import gleam/dynamic/decode
+import gleam/erlang/process
 import gleam/float
 import gleam/int
 import gleam/list
@@ -12,6 +13,7 @@ import gleam/option.{type Option, None}
 import gleam/result
 import gleam/string
 import gleam/time/timestamp.{type Timestamp}
+import rate_limiter
 import sqlight
 import wisp
 
@@ -33,12 +35,15 @@ pub type ContextError {
 /// Use the public facing domain and port as exposed by your reverse proxy
 /// `port` this process should listen on. May differ from the port included in the address
 /// `database_path` points to an sqlite3 database
+/// `ao3_label` is the id of the gmail label used to flag relevant emails
 pub type Context {
   Context(
     oauth_client: OAuthClient,
     address: String,
     port: Int,
     database_connection: sqlight.Connection,
+    ao3_label: String,
+    rate_limiter: process.Name(rate_limiter.Message),
   )
 }
 
@@ -84,7 +89,11 @@ pub fn load_context() -> Result(Context, ContextError) {
     |> result.try(create_database)
   use conn <- result.try(conn)
 
-  Context(client, addr, port, conn) |> Ok
+  use ao3_label <- result.try(get_env_var("FUC_AO3_LABEL"))
+
+  let rl_name = process.new_name("rate_limiter")
+
+  Context(client, addr, port, conn, ao3_label, rl_name) |> Ok
 }
 
 /// Get an environment variable
@@ -109,25 +118,33 @@ fn create_database(
   {
     use conn <- result.try(create_table_access_tokens(conn))
     use conn <- result.try(create_table_state_tokens(conn))
+    use conn <- result.try(create_table_emails(conn))
     Ok(conn)
   }
   |> result.map_error(fn(e) { DatabaseInitError(e) })
 }
 
 /// Wrapper for creating a table from a list of columns
+/// Favour `without_rowid: False`
+/// https://www.sqlite.org/withoutrowid.html
 fn create_table(
   conn: sqlight.Connection,
   name: String,
   cols: List(String),
+  without_rowid: Bool,
+  // prefer false
 ) -> Result(sqlight.Connection, sqlight.Error) {
-  sqlight.exec(
+  let query =
     "CREATE TABLE IF NOT EXISTS "
-      <> name
-      <> "("
-      <> string.join(cols, ",")
-      <> ")",
-    conn,
-  )
+    <> name
+    <> "("
+    <> string.join(cols, ",")
+    <> ")"
+  let query = case without_rowid {
+    True -> query <> " WITHOUT ROWID"
+    False -> query
+  }
+  sqlight.exec(query, conn)
   |> result.map(fn(_) { conn })
 }
 
@@ -163,16 +180,21 @@ fn oauth_state_from_sql() -> decode.Decoder(OAuthStateToken) {
 fn create_table_state_tokens(
   conn: sqlight.Connection,
 ) -> Result(sqlight.Connection, sqlight.Error) {
-  create_table(conn, table_oauth_state, [
-    "id INTEGER PRIMARY KEY", "state TEXT UNIQUE NOT NULL",
-    "expires_at INTEGER NOT NULL",
-  ])
+  create_table(
+    conn,
+    table_oauth_state,
+    [
+      "id INTEGER PRIMARY KEY", "state TEXT UNIQUE NOT NULL",
+      "expires_at INTEGER NOT NULL",
+    ],
+    False,
+  )
 }
 
 /// Insert request state token into database
 pub fn insert_state_token(
   state: OAuthStateToken,
-  ctx: Context,
+  conn: sqlight.Connection,
 ) -> Result(List(OAuthStateToken), sqlight.Error) {
   [
     [
@@ -188,7 +210,7 @@ pub fn insert_state_token(
   ])
   |> insert.returning(["id", "state", "expires_at"])
   |> insert.to_query
-  |> sqlite.run_write_query(oauth_state_from_sql(), ctx.database_connection)
+  |> sqlite.run_write_query(oauth_state_from_sql(), conn)
 }
 
 /// Return state with matching token from database, if it exists
@@ -196,7 +218,7 @@ pub fn insert_state_token(
 ///  exactly matches the supplied token argument.
 pub fn select_state_token(
   token: String,
-  ctx: Context,
+  conn: sqlight.Connection,
 ) -> Option(OAuthStateToken) {
   let q =
     select.new()
@@ -204,7 +226,7 @@ pub fn select_state_token(
     |> select.from_table(table_oauth_state)
     |> select.where(where.col("state") |> where.eq(where.string(token)))
     |> select.to_query
-    |> sqlite.run_read_query(oauth_state_from_sql(), ctx.database_connection)
+    |> sqlite.run_read_query(oauth_state_from_sql(), conn)
 
   case q {
     Error(e) -> {
@@ -218,7 +240,7 @@ pub fn select_state_token(
 /// Delete state token from database based on id
 pub fn delete_state_token(
   token: OAuthStateToken,
-  ctx: Context,
+  conn: sqlight.Connection,
 ) -> Result(Nil, DatabaseError) {
   case token {
     PendingStateToken(_, _) -> Error(NotARow)
@@ -228,7 +250,7 @@ pub fn delete_state_token(
       |> delete.table(table_oauth_state)
       |> delete.no_returning
       |> delete.to_query
-      |> sqlite.run_write_query(oauth_state_from_sql(), ctx.database_connection)
+      |> sqlite.run_write_query(oauth_state_from_sql(), conn)
       |> result.replace(Nil)
       |> result.map_error(fn(e) { SQLError(e) })
     }
@@ -257,26 +279,29 @@ fn oauth_token_from_sql() -> decode.Decoder(OAuthToken) {
 fn create_table_access_tokens(
   conn: sqlight.Connection,
 ) -> Result(sqlight.Connection, sqlight.Error) {
-  create_table(conn, table_oauth_tokens, [
-    "id INTEGER PRIMARY KEY", "access TEXT UNIQUE NOT NULL",
-  ])
+  create_table(
+    conn,
+    table_oauth_tokens,
+    ["id INTEGER PRIMARY KEY", "access TEXT UNIQUE NOT NULL"],
+    False,
+  )
 }
 
 /// Insert access token into database
 pub fn insert_access_token(
   token: OAuthToken,
-  ctx: Context,
+  conn: sqlight.Connection,
 ) -> Result(List(OAuthToken), sqlight.Error) {
   // TODO: Rewrite in a way less prone to sql injection
   [[insert.string(token.access)] |> insert.row]
   |> insert.from_values(table_name: table_oauth_tokens, columns: ["access"])
   |> insert.returning(["id", "access"])
   |> insert.to_query()
-  |> sqlite.run_write_query(oauth_token_from_sql(), ctx.database_connection)
+  |> sqlite.run_write_query(oauth_token_from_sql(), conn)
 }
 
 /// Get latest access token
-pub fn get_access_token(ctx: Context) -> Option(OAuthToken) {
+pub fn get_access_token(conn: sqlight.Connection) -> Option(OAuthToken) {
   let s =
     select.new()
     |> select.select_cols(["id", "access"])
@@ -285,10 +310,66 @@ pub fn get_access_token(ctx: Context) -> Option(OAuthToken) {
     // hack for latest
     |> select.limit(1)
     |> select.to_query
-    |> sqlite.run_read_query(oauth_token_from_sql(), ctx.database_connection)
+    |> sqlite.run_read_query(oauth_token_from_sql(), conn)
   case s {
     Error(e) -> {
       wisp.log_warning("Unable to get access token: " <> string.inspect(e))
+      None
+    }
+    Ok(v) -> list.first(v) |> option.from_result
+  }
+}
+
+/// PROCESSED_MESSAGES
+const table_email = "emails"
+
+pub type Email {
+  Email(id: String, success: Bool)
+}
+
+fn create_table_emails(
+  conn: sqlight.Connection,
+) -> Result(sqlight.Connection, sqlight.Error) {
+  create_table(
+    conn,
+    table_email,
+    ["id STRING PRIMARY KEY, success BOOLEAN"],
+    True,
+  )
+}
+
+fn email_from_sql() -> decode.Decoder(Email) {
+  use id <- decode.field(0, decode.string)
+  use success <- decode.field(1, sqlight.decode_bool())
+  Email(id:, success:)
+  |> decode.success()
+}
+
+pub fn insert_email(
+  id: String,
+  success: Bool,
+  conn: sqlight.Connection,
+) -> Result(List(Email), sqlight.Error) {
+  // TODO: Rewrite in a way less prone to sql injection
+  [[insert.string(id), insert.bool(success)] |> insert.row]
+  |> insert.from_values(table_name: table_email, columns: ["id", "success"])
+  |> insert.returning(["id", "success"])
+  |> insert.to_query()
+  |> sqlite.run_write_query(email_from_sql(), conn)
+}
+
+pub fn select_email(id: String, conn: sqlight.Connection) -> Option(Email) {
+  let q =
+    select.new()
+    |> select.select_cols(["id", "success"])
+    |> select.from_table(table_email)
+    |> select.where(where.col("id") |> where.eq(where.string(id)))
+    |> select.to_query
+    |> sqlite.run_read_query(email_from_sql(), conn)
+
+  case q {
+    Error(e) -> {
+      wisp.log_warning("Unable to fetch email: " <> string.inspect(e))
       None
     }
     Ok(v) -> list.first(v) |> option.from_result
