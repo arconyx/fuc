@@ -4,4 +4,6 @@
 erl_crash.dump
 .env
 *.sqlite3
-email.json
+email*.json
+batch_subscription_notification.text.erb
+sample_email*.txt

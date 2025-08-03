@@ -1,3 +1,8 @@
+//// The Maw eats email ids and spits out parsed updates
+//// 
+//// This module defines an actor that directs the fetching
+//// and parsing of individual emails.
+
 import gleam/bool
 import gleam/erlang/process.{type Name, type Subject}
 import gleam/float
@@ -5,31 +10,30 @@ import gleam/hackney
 import gleam/http
 import gleam/http/request
 import gleam/int
-import gleam/option.{type Option, None, Some}
+import gleam/option.{None, Some}
 import gleam/otp/actor
-import gleam/result
 import gleam/set.{type Set}
 import gleam/string
+import parser
 import rate_limiter
 import sqlight
 import wisp
 
-import state.{type Context, type OAuthToken}
-
-pub type MessageID =
-  String
+import database/emails
+import database/oauth/tokens.{type OAuthToken}
+import state.{type Context}
 
 pub type Message {
   /// Queue an email for processing
-  Queue(id: MessageID, manager: Subject(Message))
+  Queue(id: String, manager: Subject(Message))
   /// Mark an email as processed (success)
-  Finish(id: MessageID)
+  Finish(id: String)
   /// Start a new worker for an email (failure)
-  Restart(id: MessageID, manager: Subject(Message))
+  Restart(id: String, manager: Subject(Message))
   /// Abandon processing (failure)
-  Abandon(id: MessageID)
+  Abandon(id: String)
   // Abandon processing without marking as a failure
-  Cancel(id: MessageID)
+  Cancel(id: String)
   /// Shutdown all processing
   Die
 }
@@ -43,33 +47,20 @@ type APIContext {
   )
 }
 
-type MawState {
-  MawState(
-    active: Set(MessageID),
-    ctx: APIContext,
-    successes: Int,
-    failures: Int,
-  )
+type State {
+  State(active: Set(String), ctx: APIContext, successes: Int, failures: Int)
 }
 
-/// This function is called by the Actor each for each message it receives.
-/// Actors are single threaded only does one thing at a time, so they handle
-/// messages sequentially and one at a time, in the order they are received.
-///
-/// The function takes the message and the current state, and returns a data
-/// structure that indicates what to do next, along with the new state.
-fn handle_message(
-  stomach: MawState,
-  msg: Message,
-) -> actor.Next(MawState, Message) {
+/// Processes messages recieved by the maw
+fn handle_message(state: State, msg: Message) -> actor.Next(State, Message) {
   case msg {
     Queue(id, self) -> {
-      case set.contains(stomach.active, id) {
-        True -> actor.continue(stomach)
+      case set.contains(state.active, id) {
+        True -> actor.continue(state)
         False -> {
           let failure_score =
-            int.to_float(stomach.failures - stomach.successes)
-            /. int.to_float(stomach.successes + stomach.failures)
+            int.to_float(state.failures - state.successes)
+            /. int.to_float(state.successes + state.failures)
           case failure_score >. 0.6 {
             True -> {
               wisp.log_warning(
@@ -79,11 +70,11 @@ fn handle_message(
                 <> float.to_string(failure_score)
                 <> ")",
               )
-              actor.continue(stomach)
+              actor.continue(state)
             }
             False -> {
-              spawn_email_worker(id, stomach.ctx, self)
-              MawState(..stomach, active: stomach.active |> set.insert(id))
+              spawn_email_worker(id, state.ctx, self)
+              State(..state, active: state.active |> set.insert(id))
               |> actor.continue
             }
           }
@@ -91,28 +82,28 @@ fn handle_message(
       }
     }
     Finish(id) -> {
-      MawState(
-        ..stomach,
-        active: stomach.active |> set.delete(id),
-        successes: stomach.successes + 1,
+      State(
+        ..state,
+        active: state.active |> set.delete(id),
+        successes: state.successes + 1,
       )
       |> actor.continue
     }
     Restart(id, self) -> {
-      spawn_email_worker(id, stomach.ctx, self)
-      MawState(..stomach, failures: stomach.failures + 1)
+      spawn_email_worker(id, state.ctx, self)
+      State(..state, failures: state.failures + 1)
       |> actor.continue
     }
     Abandon(id) -> {
-      MawState(
-        ..stomach,
-        active: stomach.active |> set.delete(id),
-        failures: stomach.failures + 1,
+      State(
+        ..state,
+        active: state.active |> set.delete(id),
+        failures: state.failures + 1,
       )
       |> actor.continue
     }
     Cancel(id) -> {
-      MawState(..stomach, active: stomach.active |> set.delete(id))
+      State(..state, active: state.active |> set.delete(id))
       |> actor.continue
     }
     Die -> {
@@ -124,14 +115,14 @@ fn handle_message(
 
 pub fn start_mail_manager(ctx: Context, token: OAuthToken) {
   APIContext(ctx.database_connection, ctx.ao3_label, ctx.rate_limiter, token)
-  |> MawState(set.new(), _, 0, 0)
+  |> State(set.new(), _, 0, 0)
   |> actor.new
   |> actor.on_message(handle_message)
   |> actor.start
 }
 
 /// Spawns an email worker and traps exits
-fn spawn_email_worker(id: MessageID, ctx: APIContext, manager: Subject(Message)) {
+fn spawn_email_worker(id: String, ctx: APIContext, manager: Subject(Message)) {
   // We don't want a crashed fetch to take down the entire program
   // So we start a new process and trap exits in it
   // The new process is because I don't see a clean way to make the actor
@@ -170,12 +161,12 @@ fn spawn_email_worker(id: MessageID, ctx: APIContext, manager: Subject(Message))
 /// Middleware that asserts that an email hasn't been processed yet
 /// Calls `if_done` if it has been processed, else `next`
 fn check_not_processed(
-  id: MessageID,
+  id: String,
   ctx: APIContext,
   if_done: fn() -> Nil,
   next: fn() -> Nil,
 ) -> Nil {
-  case state.select_email(id, ctx.db) {
+  case emails.select_email(id, ctx.db) {
     Some(email) -> {
       wisp.log_warning(
         "Email "
@@ -190,11 +181,7 @@ fn check_not_processed(
 }
 
 /// Processes a single email
-fn process_email(
-  id: MessageID,
-  ctx: APIContext,
-  manager: Subject(Message),
-) -> Nil {
+fn process_email(id: String, ctx: APIContext, manager: Subject(Message)) -> Nil {
   use <- check_not_processed(id, ctx, fn() { process.send(manager, Cancel(id)) })
   let url =
     "https://gmail.googleapis.com/gmail/v1/users/me/messages/"
@@ -211,21 +198,29 @@ fn process_email(
         |> request.set_header("authorization", "Bearer " <> ctx.token.access)
       case hackney.send(req) {
         Ok(resp) if resp.status == 200 -> {
-          parse_email()
-          // Check another worker hasn't finished it
-          // We shouldn't have simulatenous work, but lets be safe
-          use <- check_not_processed(id, ctx, fn() {
-            process.send(manager, Cancel(id))
-          })
-          // TODO: Do all database updates from this email in a single transaction
-          case state.insert_email(id, True, ctx.db) {
-            Ok(_) -> Nil
-            Error(e) ->
-              wisp.log_error(
-                "Unable to mark email as processed: " <> string.inspect(e),
-              )
+          case parser.parse_email(resp) {
+            Ok(update) -> {
+              // Check another worker hasn't finished it
+              // We shouldn't have simulatenous work, but lets be safe
+              use <- check_not_processed(id, ctx, fn() {
+                process.send(manager, Cancel(id))
+              })
+              // TODO: Do all database updates from this email in a single transaction
+              // TODO: Save update
+              case emails.insert_email(id, True, ctx.db) {
+                Ok(_) -> Nil
+                Error(e) ->
+                  wisp.log_error(
+                    "Unable to mark email as processed: " <> string.inspect(e),
+                  )
+              }
+              process.send(manager, Finish(id))
+            }
+            Error(e) -> {
+              wisp.log_error("Unable to parse email: " <> string.inspect(e))
+              process.send(manager, Abandon(id))
+            }
           }
-          process.send(manager, Finish(id))
         }
         Ok(resp) if resp.status == 400 -> {
           // If we've constructed a bad request there is no point in trying again
@@ -279,8 +274,4 @@ fn process_email(
       Nil
     }
   }
-}
-
-fn parse_email() {
-  todo
 }

@@ -18,7 +18,9 @@ import mist
 import wisp.{type Request, type Response}
 import wisp/wisp_mist
 
-import state.{type Context, type OAuthToken}
+import database/oauth/state as oauth_state
+import database/oauth/tokens.{type OAuthToken}
+import state.{type Context}
 
 // ////////////// ENTRY POINT ///////////////
 
@@ -140,11 +142,11 @@ fn start_google_login(req: Request, ctx: Context) -> Response {
   use <- wisp.require_method(req, http.Get)
   let lifespan = 5 * 60
   let st =
-    state.PendingStateToken(
+    oauth_state.PendingStateToken(
       wisp.random_string(128),
       timestamp.system_time() |> timestamp.add(duration.seconds(lifespan)),
     )
-  case state.insert_state_token(st, ctx.database_connection) {
+  case oauth_state.insert_state_token(st, ctx.database_connection) {
     Ok(_) -> {
       let url =
         "https://accounts.google.com/o/oauth2/v2/auth?"
@@ -206,13 +208,15 @@ fn validate_state(
     case client == remote {
       True -> {
         let now = timestamp.system_time()
-        case state.select_state_token(client, ctx.database_connection) {
+        case oauth_state.select_state_token(client, ctx.database_connection) {
           Some(st) -> {
             // We don't need to check that st.token == client == remote
             // because it is enforced by state.select_state_token()
             case timestamp.compare(now, st.expires_at) {
               order.Lt -> {
-                case state.delete_state_token(st, ctx.database_connection) {
+                case
+                  oauth_state.delete_state_token(st, ctx.database_connection)
+                {
                   Error(e) ->
                     Ok(wisp.log_warning(
                       "Unable to delete used state token: " <> string.inspect(e),
@@ -307,13 +311,13 @@ fn request_token(req: Request, ctx: Context) -> Result(OAuthToken, Nil) {
     // the associated unix epoch
     case string.lowercase(token_type) {
       "bearer" ->
-        decode.success(state.PendingOAuthToken(access_token, token_type))
+        decode.success(tokens.PendingOAuthToken(access_token, token_type))
       t -> {
         wisp.log_error(
           "Got unknown token type '" <> t <> "' instead of 'Bearer'",
         )
         decode.failure(
-          state.PendingOAuthToken(access_token, token_type),
+          tokens.PendingOAuthToken(access_token, token_type),
           "token_type",
         )
       }
@@ -336,7 +340,7 @@ fn google_auth_callback(req: Request, ctx: Context) -> Response {
   case request_token(req, ctx) {
     Ok(token) -> {
       wisp.log_info("Login successful")
-      case state.insert_access_token(token, ctx.database_connection) {
+      case tokens.insert_access_token(token, ctx.database_connection) {
         Ok(_) -> Nil
         Error(e) -> {
           wisp.log_error("Unable to save token")
@@ -352,7 +356,7 @@ fn google_auth_callback(req: Request, ctx: Context) -> Response {
 
 /// Middleware to grab access token before making requests
 fn with_access_token(ctx: Context, next: fn(OAuthToken) -> Response) -> Response {
-  case state.get_access_token(ctx.database_connection) {
+  case tokens.get_access_token(ctx.database_connection) {
     Some(token) -> next(token)
     None -> wisp.redirect(ctx.address <> "/auth/google")
   }
