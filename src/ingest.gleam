@@ -1,8 +1,10 @@
 import gleam/bool
 import gleam/erlang/process.{type Name, type Subject}
+import gleam/float
 import gleam/hackney
 import gleam/http
 import gleam/http/request
+import gleam/int
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
@@ -20,10 +22,16 @@ pub type MessageID =
 pub type Message {
   /// Queue an email for processing
   Queue(id: MessageID, manager: Subject(Message))
-  /// Mark an email as processed
+  /// Mark an email as processed (success)
   Finish(id: MessageID)
-  /// Start a new worker for an email
+  /// Start a new worker for an email (failure)
   Restart(id: MessageID, manager: Subject(Message))
+  /// Abandon processing (failure)
+  Abandon(id: MessageID)
+  // Abandon processing without marking as a failure
+  Cancel(id: MessageID)
+  /// Shutdown all processing
+  Die
 }
 
 type APIContext {
@@ -36,7 +44,12 @@ type APIContext {
 }
 
 type MawState {
-  MawState(active: Set(MessageID), ctx: APIContext)
+  MawState(
+    active: Set(MessageID),
+    ctx: APIContext,
+    successes: Int,
+    failures: Int,
+  )
 }
 
 /// This function is called by the Actor each for each message it receives.
@@ -54,28 +67,64 @@ fn handle_message(
       case set.contains(stomach.active, id) {
         True -> actor.continue(stomach)
         False -> {
-          spawn_email_worker(id, stomach.ctx, self)
-          actor.continue(
-            MawState(..stomach, active: stomach.active |> set.insert(id)),
-          )
+          let failure_score =
+            int.to_float(stomach.failures - stomach.successes)
+            /. int.to_float(stomach.successes + stomach.failures)
+          case failure_score >. 0.6 {
+            True -> {
+              wisp.log_warning(
+                "Skipping processing of "
+                <> id
+                <> " due to excessive errors (fs "
+                <> float.to_string(failure_score)
+                <> ")",
+              )
+              actor.continue(stomach)
+            }
+            False -> {
+              spawn_email_worker(id, stomach.ctx, self)
+              MawState(..stomach, active: stomach.active |> set.insert(id))
+              |> actor.continue
+            }
+          }
         }
       }
     }
     Finish(id) -> {
-      actor.continue(
-        MawState(..stomach, active: stomach.active |> set.delete(id)),
+      MawState(
+        ..stomach,
+        active: stomach.active |> set.delete(id),
+        successes: stomach.successes + 1,
       )
+      |> actor.continue
     }
     Restart(id, self) -> {
       spawn_email_worker(id, stomach.ctx, self)
-      actor.continue(stomach)
+      MawState(..stomach, failures: stomach.failures + 1)
+      |> actor.continue
+    }
+    Abandon(id) -> {
+      MawState(
+        ..stomach,
+        active: stomach.active |> set.delete(id),
+        failures: stomach.failures + 1,
+      )
+      |> actor.continue
+    }
+    Cancel(id) -> {
+      MawState(..stomach, active: stomach.active |> set.delete(id))
+      |> actor.continue
+    }
+    Die -> {
+      wisp.log_error("Terminating maw early")
+      actor.stop()
     }
   }
 }
 
 pub fn start_mail_manager(ctx: Context, token: OAuthToken) {
   APIContext(ctx.database_connection, ctx.ao3_label, ctx.rate_limiter, token)
-  |> MawState(set.new(), _)
+  |> MawState(set.new(), _, 0, 0)
   |> actor.new
   |> actor.on_message(handle_message)
   |> actor.start
@@ -119,7 +168,13 @@ fn spawn_email_worker(id: MessageID, ctx: APIContext, manager: Subject(Message))
 }
 
 /// Middleware that asserts that an email hasn't been processed yet
-fn check_not_processed(id: MessageID, ctx: APIContext, next: fn() -> Nil) -> Nil {
+/// Calls `if_done` if it has been processed, else `next`
+fn check_not_processed(
+  id: MessageID,
+  ctx: APIContext,
+  if_done: fn() -> Nil,
+  next: fn() -> Nil,
+) -> Nil {
   case state.select_email(id, ctx.db) {
     Some(email) -> {
       wisp.log_warning(
@@ -128,6 +183,7 @@ fn check_not_processed(id: MessageID, ctx: APIContext, next: fn() -> Nil) -> Nil
         <> " has already been processed with success="
         <> bool.to_string(email.success),
       )
+      if_done()
     }
     None -> next()
   }
@@ -139,7 +195,7 @@ fn process_email(
   ctx: APIContext,
   manager: Subject(Message),
 ) -> Nil {
-  use <- check_not_processed(id, ctx)
+  use <- check_not_processed(id, ctx, fn() { process.send(manager, Cancel(id)) })
   let url =
     "https://gmail.googleapis.com/gmail/v1/users/me/messages/"
     <> id
@@ -154,21 +210,13 @@ fn process_email(
         |> request.set_method(http.Get)
         |> request.set_header("authorization", "Bearer " <> ctx.token.access)
       case hackney.send(req) {
-        Error(e) -> {
-          wisp.log_warning(
-            "Request for message "
-            <> id
-            <> "failed with error: "
-            <> string.inspect(e),
-          )
-          process.sleep(10 * 1000)
-          process.send(manager, Restart(id, manager))
-        }
-        Ok(resp) -> {
+        Ok(resp) if resp.status == 200 -> {
           parse_email()
           // Check another worker hasn't finished it
           // We shouldn't have simulatenous work, but lets be safe
-          use <- check_not_processed(id, ctx)
+          use <- check_not_processed(id, ctx, fn() {
+            process.send(manager, Cancel(id))
+          })
           // TODO: Do all database updates from this email in a single transaction
           case state.insert_email(id, True, ctx.db) {
             Ok(_) -> Nil
@@ -178,6 +226,54 @@ fn process_email(
               )
           }
           process.send(manager, Finish(id))
+        }
+        Ok(resp) if resp.status == 400 -> {
+          // If we've constructed a bad request there is no point in trying again
+          wisp.log_error(
+            "Gmail reports bad request: " <> string.inspect(resp.body),
+          )
+          process.send(manager, Abandon(id))
+        }
+        Ok(resp) if resp.status == 401 -> {
+          // If one request is unauthorised, they all are
+          // Abort further mail processing
+          // TODO: Automate reauth?
+          wisp.log_warning("Gmail reports unauthorised")
+          process.send(manager, Die)
+        }
+        Ok(resp) if resp.status == 403 || resp.status == 429 -> {
+          // Handle rate limits by sleeping a bit before retrying
+          // Random sleep length is intended to spread requests
+          // If we have several failures close together
+          wisp.log_warning("Rate limit reached, sleeping")
+          process.sleep({ 15 + int.random(60) } * 1000)
+          process.send(manager, Restart(id, manager))
+        }
+        Ok(resp) if resp.status == 500 -> {
+          // If there's an internal issue with google we sleep
+          // but not as long as if we'd hit the rate limit
+          wisp.log_warning("Google had an internal error")
+          process.sleep({ 1 + int.random(5) } * 1000)
+          process.send(manager, Restart(id, manager))
+        }
+        Ok(resp) -> {
+          wisp.log_warning(
+            "Got unexpected status code "
+            <> int.to_string(resp.status)
+            <> " with body "
+            <> string.inspect(resp.body),
+          )
+        }
+        Error(e) -> {
+          // If we had an issue on our end retry the request
+          wisp.log_warning(
+            "Request for message "
+            <> id
+            <> "failed with error: "
+            <> string.inspect(e),
+          )
+          process.sleep(10 * 1000)
+          process.send(manager, Restart(id, manager))
         }
       }
       Nil
