@@ -1,7 +1,7 @@
 # fuc
 
-[![Package Version](https://img.shields.io/hexpm/v/fuc)](https://hex.pm/packages/fuc)
-[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/fuc/)
+<!-- [![Package Version](https://img.shields.io/hexpm/v/fuc)](https://hex.pm/packages/fuc) -->
+<!-- [![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/fuc/) -->
 
 ```sh
 gleam add fuc@1
