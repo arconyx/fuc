@@ -1,4 +1,3 @@
-import database/works.{type Work}
 import gleam/bit_array
 import gleam/dynamic/decode
 import gleam/http/response.{type Response}
@@ -17,6 +16,27 @@ pub type Error {
   // it onto the end of the string
   ParseError(String)
   BuilderError(String)
+}
+
+/// AO3 emails only include full details for a work once per email
+/// For all successive works we can only get the title and id
+/// We model this as a DetailedWork and a SparseWork
+pub type Work {
+  DetailedWork(
+    id: Int,
+    title: String,
+    authors: String,
+    chapters: String,
+    fandom: String,
+    rating: String,
+    warnings: String,
+    // relationships: Option(String),
+    // character: Option(String),
+    // additional_tags: Option(String),
+    series: Option(String),
+    summary: Option(String),
+  )
+  SparseWork(id: Int, title: String)
 }
 
 pub type ArchiveUpdate {
@@ -253,7 +273,7 @@ fn to_update(builder: UpdateBuilder) -> Result(ArchiveUpdate, Error) {
       None,
       None,
       IsNewWork,
-    ) -> works.SparseWork(work_id, work_title) |> NewWork |> Ok
+    ) -> SparseWork(work_id, work_title) |> NewWork |> Ok
     // Detailed work + new work
     WorkUpdateBuilder(
       Some(work_id),
@@ -267,7 +287,7 @@ fn to_update(builder: UpdateBuilder) -> Result(ArchiveUpdate, Error) {
       summary,
       IsNewWork,
     ) ->
-      works.DetailedWork(
+      DetailedWork(
         work_id,
         work_title,
         authors,
@@ -296,7 +316,7 @@ fn to_update(builder: UpdateBuilder) -> Result(ArchiveUpdate, Error) {
       Some(chapter_title),
       chapter_summary,
     ) ->
-      works.SparseWork(work_id, work_title)
+      SparseWork(work_id, work_title)
       |> NewChapter(chapter_id, chapter_title, chapter_summary)
       |> Ok
     // Detaileld work + new chapter
@@ -315,7 +335,7 @@ fn to_update(builder: UpdateBuilder) -> Result(ArchiveUpdate, Error) {
       Some(chapter_title),
       chapter_summary,
     ) ->
-      works.DetailedWork(
+      DetailedWork(
         work_id,
         work_title,
         authors,

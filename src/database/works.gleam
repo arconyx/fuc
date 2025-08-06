@@ -1,12 +1,12 @@
 import cake/adapter/sqlite
-import cake/insert.{type InsertRow}
+import cake/insert.{type InsertRow, type InsertValue}
+import cake/select
 import cake/update
 import cake/where
 import database/internal
-import database/oauth/tokens
 import gleam/dynamic/decode
 import gleam/list
-import gleam/option.{type Option}
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import sqlight.{type Connection, type Error}
 
@@ -15,10 +15,14 @@ const table_work = "works"
 // TODO: Consider setting WAL on database
 
 /// AO3 emails only include full details for a work once per email
-/// For all successive works we can only get the title and id
-/// We model this as a DetailedWork and a SparseWork
+/// We only allow inserting these detailed emails into the database
+// This should be fine so long as we do all work insertions for an update
+// before any update insertions (as every email includes detailed information
+// for all its works)
+// We use this type instead of the Work type in parser.gleam to make passing
+// a SparseWork impossible
 pub type Work {
-  DetailedWork(
+  Work(
     id: Int,
     title: String,
     authors: String,
@@ -26,13 +30,9 @@ pub type Work {
     fandom: String,
     rating: String,
     warnings: String,
-    // relationships: Option(String),
-    // character: Option(String),
-    // additional_tags: Option(String),
     series: Option(String),
     summary: Option(String),
   )
-  SparseWork(id: Int, title: String)
 }
 
 pub fn create_table(conn: Connection) -> Result(Connection, Error) {
@@ -40,9 +40,9 @@ pub fn create_table(conn: Connection) -> Result(Connection, Error) {
     conn,
     table_work,
     [
-      "id INTEGER PRIMARY KEY", "title TEXT NOT NULL", "authors TEXT",
-      "chapters TEXT", "fandom TEXT", "rating TEXT", "warnings TEXT",
-      "series TEXT", "summary TEXT",
+      "id INTEGER PRIMARY KEY", "title TEXT NOT NULL", "authors TEXT NOT NULL",
+      "chapters TEXT NOT NULL", "fandom TEXT NOT NULL", "rating TEXT NOT NULL",
+      "warnings TEXT NOT NULL", "series TEXT", "summary TEXT",
     ],
     False,
   )
@@ -52,97 +52,86 @@ pub fn create_table(conn: Connection) -> Result(Connection, Error) {
 // outdated data from old emails but that's only a concern on initial sync.
 // Lets ignore it.
 
+/// Unwraps an option to an InsertValue that is null (no update) if the `op` is None
+fn option_to_sql(op: Option(a), to_sql: fn(a) -> InsertValue) -> InsertValue {
+  case op {
+    Some(a) -> to_sql(a)
+    None -> insert.null()
+  }
+}
+
 fn work_to_sql(work: Work) -> InsertRow {
-  case work {
-    SparseWork(id, title) ->
-      [insert.int(id), insert.string(title)] |> insert.row
-    DetailedWork(..) ->
-      [
-        insert.int(work.id),
-        insert.string(work.title),
-        insert.string(work.authors),
-        insert.string(work.chapters),
-        insert.string(work.fandom),
-        insert.string(work.rating),
-        insert.string(work.warnings),
-        work.series
-          |> option.map(insert.string)
-          |> option.lazy_unwrap(insert.null),
-        work.summary
-          |> option.map(insert.string)
-          |> option.lazy_unwrap(insert.null),
-      ]
-      |> insert.row
-  }
+  [
+    work.id |> insert.int,
+    work.title |> insert.string,
+    work.authors |> insert.string,
+    work.chapters |> insert.string,
+    work.fandom |> insert.string,
+    work.rating |> insert.string,
+    work.warnings |> insert.string,
+    option_to_sql(work.series, insert.string),
+    option_to_sql(work.summary, insert.string),
+  ]
+  |> insert.row
 }
 
-fn is_detailed(work: Work) {
-  case work {
-    DetailedWork(..) -> True
-    SparseWork(..) -> False
-  }
+fn work_from_sql() -> decode.Decoder(Work) {
+  use id <- decode.field(0, decode.int)
+  use title <- decode.field(1, decode.string)
+  use authors <- decode.field(2, decode.string)
+  use chapters <- decode.field(3, decode.string)
+  use fandom <- decode.field(4, decode.string)
+  use rating <- decode.field(5, decode.string)
+  use warnings <- decode.field(6, decode.string)
+  use series <- decode.field(7, decode.optional(decode.string))
+  use summary <- decode.field(8, decode.optional(decode.string))
+  Work(id, title, authors, chapters, fandom, rating, warnings, series, summary)
+  |> decode.success
 }
 
-/// Please call this inside a transcation
-/// It has two seperate write operations and no way to rollback both if one fails
 pub fn insert_works(works: List(Work), conn: Connection) -> Result(Nil, Error) {
-  let #(detailed, sparse) = list.partition(works, is_detailed)
+  works
+  |> insert.from_records(
+    table_work,
+    [
+      "id", "title", "authors", "chapters", "fandom", "rating", "warnings",
+      "series", "summary",
+    ],
+    _,
+    work_to_sql,
+  )
+  |> insert.on_columns_conflict_update(
+    ["id"],
+    where.none(),
+    update.new()
+      |> update.sets([
+        "title" |> update.set_expression("excluded.title"),
+        "authors" |> update.set_expression("excluded.authors"),
+        "chapters" |> update.set_expression("excluded.chapters"),
+        "fandom" |> update.set_expression("excluded.fandom"),
+        "rating" |> update.set_expression("excluded.rating"),
+        "warnings" |> update.set_expression("excluded.warnings"),
+        "series" |> update.set_expression("excluded.series"),
+        "summary" |> update.set_expression("excluded.summary"),
+      ]),
+  )
+  |> insert.no_returning
+  |> insert.to_query
+  |> sqlite.run_write_query(decode.dynamic, conn)
+  |> result.replace(Nil)
+}
 
-  let detailed_query = case detailed {
-    [] -> option.None
-    _ ->
-      detailed
-      |> insert.from_records(
-        table_work,
-        [
-          "id", "title", "authors", "chapters", "fandom", "rating", "warnings",
-          "series", "summary",
-        ],
-        _,
-        work_to_sql,
-      )
-      |> insert.on_columns_conflict_update(
-        ["id"],
-        where.none(),
-        update.new()
-          |> update.sets([
-            "title" |> update.set_expression("excluded.title"),
-            "authors" |> update.set_expression("excluded.authors"),
-            "chapters" |> update.set_expression("excluded.chapters"),
-            "fandom" |> update.set_expression("excluded.fandom"),
-            "rating" |> update.set_expression("excluded.rating"),
-            "warnings" |> update.set_expression("excluded.warnings"),
-            "series" |> update.set_expression("excluded.series"),
-            "summary" |> update.set_expression("excluded.summary"),
-          ]),
-      )
-      |> insert.to_query
-      |> option.Some
-  }
-
-  let sparse_query = case sparse {
-    [] -> option.None
-    _ ->
-      sparse
-      |> insert.from_records(table_work, ["id", "title"], _, work_to_sql)
-      |> insert.on_columns_conflict_update(
-        ["id"],
-        where.none(),
-        update.new()
-          |> update.sets(["title" |> update.set_expression("excluded.title")]),
-      )
-      |> insert.to_query
-      |> option.Some
-  }
-
-  let detailed_res =
-    option.map(detailed_query, fn(q) {
-      sqlite.run_write_query(q, decode.dynamic, conn)
-    })
-  let sparse_res =
-    option.map(sparse_query, fn(q) {
-      sqlite.run_write_query(q, decode.dynamic, conn)
-    })
-
-  option.values([detailed_res, sparse_res]) |> result.all |> result.replace(Nil)
+pub fn select_works(
+  ids: List(Int),
+  conn: Connection,
+) -> Result(List(Work), Error) {
+  select.new()
+  |> select.select_cols([
+    "id", "title", "authors", "chapters", "fandom", "rating", "warnings",
+    "series", "summary",
+  ])
+  |> select.from_table(table_work)
+  |> select.where(where.col("id") |> where.in(ids |> list.map(where.int)))
+  |> select.to_query
+  |> sqlite.run_read_query(work_from_sql(), conn)
 }
