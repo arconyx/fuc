@@ -52,7 +52,7 @@ pub fn create_table(conn: Connection) -> Result(Connection, Error) {
 // outdated data from old emails but that's only a concern on initial sync.
 // Lets ignore it.
 
-/// Unwraps an option to an InsertValue that is null (no update) if the `op` is None
+/// Unwraps an option to an InsertValue that is null if the `op` is None
 fn option_to_sql(op: Option(a), to_sql: fn(a) -> InsertValue) -> InsertValue {
   case op {
     Some(a) -> to_sql(a)

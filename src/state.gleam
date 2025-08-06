@@ -14,7 +14,8 @@ pub type ContextError {
   MissingVariable(key: String)
   ParsingError(value: String)
   Impossible(wtf: String)
-  DatabaseInitError(err: sqlight.Error)
+  DatabaseInitError(err: database.Error)
+  SqlightError(err: sqlight.Error)
 }
 
 /// Context for server invocation
@@ -74,10 +75,10 @@ pub fn load_context() -> Result(Context, ContextError) {
   // Create the database as soon as we know what it is called
   use database_path <- result.try(get_env_var("FUC_DATABASE_PATH"))
   let conn =
-    {
-      use conn <- result.try(sqlight.open(database_path))
-      database.create_database(conn)
-    }
+    sqlight.open(database_path) |> result.map_error(fn(e) { SqlightError(e) })
+  use conn <- result.try(conn)
+  let conn =
+    database.create_database(conn)
     |> result.map_error(fn(e) { DatabaseInitError(e) })
   use conn <- result.try(conn)
 
