@@ -3,6 +3,10 @@
 //// This module defines an actor that directs the fetching
 //// and parsing of individual emails.
 
+import database/emails
+import database/oauth/tokens.{type OAuthToken}
+import database/update
+import database/works
 import gleam/bool
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Name, type Subject}
@@ -15,16 +19,15 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
+import gleam/result
 import gleam/set.{type Set}
 import gleam/string
-import parser
+import gleam/time/timestamp.{type Timestamp}
+import parser.{type ArchiveUpdate}
 import rate_limiter
 import sqlight
-import wisp
-
-import database/emails
-import database/oauth/tokens.{type OAuthToken}
 import state.{type Context}
+import wisp
 
 const api_path = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
 
@@ -219,24 +222,41 @@ fn process_email(id: String, ctx: APIContext, manager: Subject(Message)) -> Nil 
       case hackney.send(req) {
         Ok(resp) if resp.status == 200 -> {
           case parser.parse_email(resp) {
-            Ok(update) -> {
+            Ok(#(updates, time)) -> {
               // Check another worker hasn't finished it
               // We shouldn't have simulatenous work, but lets be safe
               use <- check_not_processed(id, ctx, fn() {
                 process.send(manager, Cancel(id))
               })
               // TODO: Do all database updates from this email in a single transaction
-              // TODO: Save update
-              case emails.insert_email(id, True, ctx.db) {
-                Ok(_) -> Nil
-                Error(e) ->
-                  wisp.log_error(
-                    "Unable to mark email as processed: " <> string.inspect(e),
+              // Save works and updates to the database
+              case save_updates(ctx, updates, time) {
+                Ok(_) ->
+                  // Mark this email as processed so we don't try it again in the future
+                  case emails.insert_email(id, True, ctx.db) {
+                    Ok(_) -> process.send(manager, Finish(id))
+                    Error(e) -> {
+                      // If we've ended up here then the worst that might happen is that
+                      // we might someday reprocess the email and duplicate the updates
+                      wisp.log_error(
+                        "Unable to mark email as processed: "
+                        <> string.inspect(e),
+                      )
+                      process.send(manager, Finish(id))
+                    }
+                  }
+                Error(e) -> {
+                  // Failure to save updates may be a temporary database issue
+                  // There's no harm in trying again
+                  wisp.log_warning(
+                    "Unable to save updates: " <> string.inspect(e),
                   )
+                  process.send(manager, Restart(id, manager))
+                }
               }
-              process.send(manager, Finish(id))
             }
             Error(e) -> {
+              // If we can't parse the email then there's no point trying again
               wisp.log_error("Unable to parse email: " <> string.inspect(e))
               process.send(manager, Abandon(id))
             }
@@ -350,4 +370,49 @@ fn feed_maw(
         "Unable to construct request from list messages url: " <> url,
       )
   }
+}
+
+fn save_updates(
+  ctx: APIContext,
+  updates: List(ArchiveUpdate),
+  time: Timestamp,
+) -> Result(Nil, sqlight.Error) {
+  // Extract all works and write them to the database
+  let work_query =
+    updates
+    |> list.map(fn(up) {
+      case up.work {
+        parser.SparseWork(..) -> None
+        parser.DetailedWork(..) as w ->
+          works.Work(
+            w.id,
+            w.title,
+            w.authors,
+            w.chapters,
+            w.fandom,
+            w.rating,
+            w.warnings,
+            w.series,
+            w.summary,
+          )
+          |> Some
+      }
+    })
+    |> option.values
+    |> works.insert_works(ctx.db)
+
+  use _ <- result.try(work_query)
+
+  // Now that we've added works, we can add
+  // the associated updates
+  updates
+  |> list.map(fn(up) {
+    case up {
+      parser.NewWork(work) ->
+        update.PendingUpdate(work.id, None, "Work Created", None, time)
+      parser.NewChapter(work, chapter_id, title, summary) ->
+        update.PendingUpdate(work.id, Some(chapter_id), title, summary, time)
+    }
+  })
+  |> update.insert_updates(ctx.db)
 }

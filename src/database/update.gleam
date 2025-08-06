@@ -4,8 +4,10 @@ import cake/select
 import cake/where
 import database/internal
 import gleam/dynamic/decode
+import gleam/float
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/time/timestamp.{type Timestamp}
 import sqlight.{type Connection, type Error}
 
 const table_update = "updates"
@@ -22,6 +24,7 @@ pub type PendingUpdate {
     chapter_id: Option(Int),
     title: String,
     summary: Option(String),
+    time: Timestamp,
   )
 }
 
@@ -32,6 +35,7 @@ pub type UpdateRow {
     chapter_id: Option(Int),
     title: String,
     summary: Option(String),
+    time: Timestamp,
   )
 }
 
@@ -42,7 +46,7 @@ pub fn create_table(conn: Connection) -> Result(Connection, Error) {
     [
       "id INTEGER PRIMARY KEY",
       "FOREIGN_KEY(work_id) REFERENCES work(id) NOT NULL", "chapter_id INTEGER",
-      "title TEXT NOT NULL", "summary TEXT",
+      "title TEXT NOT NULL", "summary TEXT", "time INTEGER NOT NULL",
     ],
     False,
   )
@@ -61,6 +65,7 @@ fn update_to_sql(update: PendingUpdate) -> InsertRow {
     update.chapter_id |> option_to_sql(insert.int),
     update.title |> insert.string,
     update.summary |> option_to_sql(insert.string),
+    update.time |> timestamp.to_unix_seconds |> float.truncate |> insert.int,
   ]
   |> insert.row
 }
@@ -71,7 +76,16 @@ fn update_from_sql() -> decode.Decoder(UpdateRow) {
   use chapter_id <- decode.field(2, decode.optional(decode.int))
   use title <- decode.field(3, decode.string)
   use summary <- decode.field(4, decode.optional(decode.string))
-  UpdateRow(id, work_id, chapter_id, title, summary) |> decode.success
+  use time <- decode.field(5, decode.int)
+  UpdateRow(
+    id,
+    work_id,
+    chapter_id,
+    title,
+    summary,
+    timestamp.from_unix_seconds(time),
+  )
+  |> decode.success
 }
 
 pub fn insert_updates(
