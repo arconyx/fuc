@@ -4,14 +4,18 @@
 //// and parsing of individual emails.
 
 import gleam/bool
+import gleam/dynamic/decode
 import gleam/erlang/process.{type Name, type Subject}
 import gleam/float
 import gleam/hackney
 import gleam/http
 import gleam/http/request
 import gleam/int
-import gleam/option.{None, Some}
+import gleam/json
+import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
+import gleam/result
 import gleam/set.{type Set}
 import gleam/string
 import parser
@@ -23,7 +27,20 @@ import database/emails
 import database/oauth/tokens.{type OAuthToken}
 import state.{type Context}
 
-pub type Message {
+const api_path = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
+
+pub fn awaken_the_maw(ctx: Context, token: OAuthToken) -> Nil {
+  let api_ctx = make_api_context(ctx, token)
+  case start_mail_manager(api_ctx) {
+    Ok(manager) -> {
+      process.spawn(fn() { feed_maw(manager.data, api_ctx, None) })
+      Nil
+    }
+    Error(_) -> wisp.log_error("Unable to start mail manager")
+  }
+}
+
+type Message {
   /// Queue an email for processing
   Queue(id: String, manager: Subject(Message))
   /// Mark an email as processed (success)
@@ -47,6 +64,13 @@ type APIContext {
   )
 }
 
+fn make_api_context(ctx: Context, token: OAuthToken) -> APIContext {
+  APIContext(ctx.database_connection, ctx.ao3_label, ctx.rate_limiter, token)
+}
+
+// TODO: Modify actor so we can extract progress information
+// Probably track size(active) as a state property?
+// We could just use list.length(active) but that is O(n)
 type State {
   State(active: Set(String), ctx: APIContext, successes: Int, failures: Int)
 }
@@ -113,9 +137,8 @@ fn handle_message(state: State, msg: Message) -> actor.Next(State, Message) {
   }
 }
 
-pub fn start_mail_manager(ctx: Context, token: OAuthToken) {
-  APIContext(ctx.database_connection, ctx.ao3_label, ctx.rate_limiter, token)
-  |> State(set.new(), _, 0, 0)
+fn start_mail_manager(ctx: APIContext) {
+  State(set.new(), ctx, 0, 0)
   |> actor.new
   |> actor.on_message(handle_message)
   |> actor.start
@@ -183,10 +206,7 @@ fn check_not_processed(
 /// Processes a single email
 fn process_email(id: String, ctx: APIContext, manager: Subject(Message)) -> Nil {
   use <- check_not_processed(id, ctx, fn() { process.send(manager, Cancel(id)) })
-  let url =
-    "https://gmail.googleapis.com/gmail/v1/users/me/messages/"
-    <> id
-    <> "?format=full"
+  let url = api_path <> "/" <> id <> "?format=full"
   case request.to(url) {
     Error(_) -> {
       wisp.log_error("Unable to construct request from url (aborting): " <> url)
@@ -196,6 +216,7 @@ fn process_email(id: String, ctx: APIContext, manager: Subject(Message)) -> Nil 
         req
         |> request.set_method(http.Get)
         |> request.set_header("authorization", "Bearer " <> ctx.token.access)
+      use <- rate_limiter.rate_limited(ctx.limiter, 5)
       case hackney.send(req) {
         Ok(resp) if resp.status == 200 -> {
           case parser.parse_email(resp) {
@@ -273,5 +294,61 @@ fn process_email(id: String, ctx: APIContext, manager: Subject(Message)) -> Nil 
       }
       Nil
     }
+  }
+}
+
+fn feed_maw(
+  maw: Subject(Message),
+  ctx: APIContext,
+  page_id: Option(String),
+) -> Nil {
+  let base_url =
+    api_path
+    <> "?q=from:do-not-reply%40archiveofourown.org&includeSpamTrash=false"
+    <> "&labelIds="
+    <> ctx.label
+  let url = case page_id {
+    Some(id) -> base_url <> "&pageToken=" <> id
+    None -> base_url
+  }
+
+  let msg_decoder = {
+    use id <- decode.field("id", decode.string)
+    id |> decode.success
+  }
+
+  let decoder = {
+    use next_page <- decode.field("nextPageToken", decode.string)
+    use messages <- decode.field("messages", decode.list(msg_decoder))
+    #(messages, next_page) |> decode.success
+  }
+
+  use <- rate_limiter.rate_limited(ctx.limiter, 5)
+  case request.to(url) {
+    Ok(req) -> {
+      let resp =
+        request.set_header(req, "authorization", "Bearer " <> ctx.token.access)
+        |> hackney.send
+      case resp {
+        Ok(resp) -> {
+          case json.parse(resp.body, decoder) {
+            Ok(#(messages, next_page)) -> {
+              list.map(messages, fn(id) { process_email(id, ctx, maw) })
+              feed_maw(maw, ctx, Some(next_page))
+            }
+            Error(e) ->
+              wisp.log_error(
+                "Unable to parse message list: " <> string.inspect(e),
+              )
+          }
+        }
+        Error(e) ->
+          wisp.log_error("Message list request failed: " <> string.inspect(e))
+      }
+    }
+    Error(_) ->
+      wisp.log_error(
+        "Unable to construct request from list messages url: " <> url,
+      )
   }
 }

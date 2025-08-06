@@ -15,6 +15,7 @@ import gleam/time/duration
 import gleam/time/timestamp
 import gleam/uri
 import mist
+import rate_limiter
 import wisp.{type Request, type Response}
 import wisp/wisp_mist
 
@@ -37,6 +38,9 @@ pub fn main() {
 
   case ctx, secret_key_base {
     Ok(ctx), Ok(secret_key_base) -> {
+      // Using a let assert because it simplifies the logic and we
+      // *want* to panic if it fails
+      let assert Ok(_) = rate_limiter.start_rate_limiter(ctx.rate_limiter)
       let server =
         route_request(_, ctx)
         |> wisp_mist.handler(secret_key_base)
