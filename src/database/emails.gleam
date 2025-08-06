@@ -23,7 +23,7 @@ pub fn create_table(
   internal.create_table(
     conn,
     table_email,
-    ["id STRING PRIMARY KEY, success BOOLEAN"],
+    ["id STRING PRIMARY KEY", "success BOOLEAN"],
     True,
   )
 }
