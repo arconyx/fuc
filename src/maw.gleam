@@ -250,7 +250,7 @@ fn process_email(id: String, ctx: APIContext, manager: Subject(Message)) -> Nil 
                     Error(e) -> {
                       // If we've ended up here then the worst that might happen is that
                       // we might someday reprocess the email and duplicate the updates
-                      wisp.log_error(
+                      wisp.log_warning(
                         "Unable to mark email as processed: "
                         <> string.inspect(e),
                       )
