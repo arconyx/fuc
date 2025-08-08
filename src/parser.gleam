@@ -437,7 +437,7 @@ pub fn parse_email(
 }
 
 // TODO: Start by breaking on divider?
-const archive_email_update_divider = "--------------------"
+const archive_email_update_divider = "\n--------------------\n"
 
 pub fn parse_updates_from_email(
   body: String,
@@ -473,7 +473,13 @@ fn parse_update(blob: String) -> Result(ArchiveUpdate, Error) {
               Error(ParseError("Unable to construct word count regex"))
           }
         }
-        line -> Error(ParseError("Unable to parse title from: " <> line))
+        line ->
+          Error(ParseError(
+            "Unable to parse title from: "
+            <> line
+            <> "\nIn email:\n"
+            <> string.inspect(lines),
+          ))
       }
     }
     [] -> Error(ParseError("Empty list when seeking title"))
