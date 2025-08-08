@@ -10,7 +10,7 @@ import gleam/option.{None, Some}
 import gleam/order
 import gleam/result
 import gleam/string
-import gleam/string_tree
+import gleam/string_tree.{type StringTree}
 import gleam/time/duration
 import gleam/time/timestamp
 import gleam/uri
@@ -22,6 +22,7 @@ import wisp/wisp_mist
 
 import database/oauth/state as oauth_state
 import database/oauth/tokens.{type OAuthToken}
+import database/unified.{type WorkWithUpdateCount}
 import state.{type Context}
 
 // ////////////// ENTRY POINT ///////////////
@@ -116,8 +117,30 @@ fn route_request(req: Request, ctx: Context) -> Response {
 
 // ////////// ENDPOINTS ////////////////////////
 
+fn work_to_list_item(work: WorkWithUpdateCount) -> String {
+  "<p><a href='/work/"
+  <> int.to_string(work.id)
+  <> "'>"
+  <> work.title
+  <> "</a> by "
+  <> work.authors
+  <> " ("
+  <> int.to_string(work.count)
+  <> " updates)</p>"
+}
+
+fn generate_work_list(ctx: Context) -> StringTree {
+  case unified.select_works_with_updates(ctx.database_connection) {
+    Ok(works) -> list.map(works, work_to_list_item) |> string_tree.from_strings
+    Error(e) -> {
+      wisp.log_error("Error generating work list: " <> string.inspect(e))
+      string_tree.from_string("<p>Error generating work list<p>")
+    }
+  }
+}
+
 // Handle GET requests to the site root
-fn home_page(req: Request, _ctx: Context) -> Response {
+fn home_page(req: Request, ctx: Context) -> Response {
   use <- wisp.require_method(req, http.Get)
 
   let body =
@@ -127,6 +150,7 @@ fn home_page(req: Request, _ctx: Context) -> Response {
         <button type='submit'>Sync</button>
       </form>",
     )
+    |> string_tree.append_tree(generate_work_list(ctx))
 
   wisp.ok()
   |> wisp.html_body(body)

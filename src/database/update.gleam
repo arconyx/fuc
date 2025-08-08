@@ -11,7 +11,7 @@ import gleam/result
 import gleam/time/timestamp.{type Timestamp}
 import sqlight.{type Connection, type Error}
 
-const table_update = "updates"
+pub const table_update = "updates"
 
 // AO3 updates may be works or chapters
 // Chapters have seperate titles and summaries to works
