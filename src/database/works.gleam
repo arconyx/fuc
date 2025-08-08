@@ -10,7 +10,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import sqlight.{type Connection, type Error}
 
-const table_work = "works"
+pub const table_work = "works"
 
 // TODO: Consider setting WAL on database
 

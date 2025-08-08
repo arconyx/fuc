@@ -3,6 +3,7 @@ import cake/insert.{type InsertRow, type InsertValue}
 import cake/select
 import cake/where
 import database/internal
+import database/works
 import gleam/dynamic/decode
 import gleam/float
 import gleam/option.{type Option, None, Some}
@@ -44,9 +45,13 @@ pub fn create_table(conn: Connection) -> Result(Connection, Nil) {
     conn,
     table_update,
     [
-      "id INTEGER PRIMARY KEY", "work_id INTEGER NOT NULL", "chapter_id INTEGER",
-      "title TEXT NOT NULL", "summary TEXT", "time INTEGER NOT NULL",
-      "FOREIGN KEY(work_id) REFERENCES work(id)",
+      "id INTEGER PRIMARY KEY",
+      "work_id INTEGER NOT NULL",
+      "chapter_id INTEGER",
+      "title TEXT NOT NULL",
+      "summary TEXT",
+      "time INTEGER NOT NULL",
+      "FOREIGN KEY(work_id) REFERENCES " <> works.table_work <> "(id)",
     ],
     False,
   )
@@ -94,7 +99,7 @@ pub fn insert_updates(
 ) -> Result(Nil, Error) {
   insert.from_records(
     table_update,
-    ["work_id", "chapter_id", "title", "summary"],
+    ["work_id", "chapter_id", "title", "summary", "time"],
     updates,
     update_to_sql,
   )
