@@ -352,12 +352,12 @@ fn to_update(builder: UpdateBuilder) -> Result(ArchiveUpdate, Error) {
   }
 }
 
-const archive_email_header = "Archive of Our Own\n=========================================\n\n"
+const archive_email_header = "========================================="
 
 fn strip_header(s: String) -> Result(String, Error) {
   case string.split_once(s, archive_email_header) {
-    Ok(#(_, trimmed)) -> Ok(trimmed)
-    Error(_) -> Error(ParseError("Header not found. Email: \n" <> s))
+    Ok(#(_, trimmed)) -> string.trim_start(trimmed) |> Ok
+    Error(Nil) -> Error(ParseError("Header not found. Email: \n" <> s))
   }
 }
 
@@ -443,6 +443,7 @@ pub fn parse_updates_from_email(
   body: String,
 ) -> Result(List(ArchiveUpdate), Error) {
   // Normalise line endings
+  let body = string.replace(body, "\r\r\n", "\n")
   let body = string.replace(body, "\r\n", "\n")
 
   use body <- result.try(body |> strip_header)
