@@ -14,6 +14,7 @@ import gleam/string_tree
 import gleam/time/duration
 import gleam/time/timestamp
 import gleam/uri
+import maw
 import mist
 import rate_limiter
 import wisp.{type Request, type Response}
@@ -108,6 +109,7 @@ fn route_request(req: Request, ctx: Context) -> Response {
     ["login"] -> login_page(req, ctx)
     ["auth", "google"] -> start_google_login(req, ctx)
     ["auth", "callback"] -> google_auth_callback(req, ctx)
+    ["internal", "sync"] -> sync_inbox(req, ctx)
     _ -> wisp.not_found()
   }
 }
@@ -118,7 +120,13 @@ fn route_request(req: Request, ctx: Context) -> Response {
 fn home_page(req: Request, _ctx: Context) -> Response {
   use <- wisp.require_method(req, http.Get)
 
-  let body = string_tree.from_string("<p>Hello World</p>")
+  let body =
+    string_tree.from_string(
+      "<p>Hello World</p>
+      <form action='/internal/sync' method='POST'>
+        <button type='submit'>Sync</button>
+      </form>",
+    )
 
   wisp.ok()
   |> wisp.html_body(body)
@@ -363,4 +371,13 @@ fn with_access_token(ctx: Context, next: fn(OAuthToken) -> Response) -> Response
     None -> wisp.redirect(ctx.address <> "/auth/google")
   }
   // TODO: Validate token hasn't expired
+}
+
+fn sync_inbox(req: Request, ctx: Context) -> Response {
+  use <- wisp.require_method(req, http.Post)
+  use token <- with_access_token(ctx)
+  case maw.awaken_the_maw(ctx, token) {
+    Ok(Nil) -> wisp.redirect("/")
+    Error(Nil) -> wisp.internal_server_error()
+  }
 }
