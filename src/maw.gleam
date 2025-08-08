@@ -349,7 +349,11 @@ fn feed_maw(
   }
 
   let decoder = {
-    use next_page <- decode.field("nextPageToken", decode.string)
+    use next_page <- decode.optional_field(
+      "nextPageToken",
+      None,
+      decode.optional(decode.string),
+    )
     use messages <- decode.field("messages", decode.list(msg_decoder))
     #(messages, next_page) |> decode.success
   }
@@ -365,7 +369,10 @@ fn feed_maw(
           case json.parse(resp.body, decoder) {
             Ok(#(messages, next_page)) -> {
               list.map(messages, fn(id) { process_email(id, ctx, maw) })
-              feed_maw(maw, ctx, Some(next_page))
+              case next_page {
+                Some(next_page) -> feed_maw(maw, ctx, Some(next_page))
+                None -> wisp.log_info("All pages processed")
+              }
             }
             Error(e) ->
               wisp.log_error(
