@@ -31,14 +31,17 @@ import wisp
 
 const api_path = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
 
-pub fn awaken_the_maw(ctx: Context, token: OAuthToken) -> Nil {
+pub fn awaken_the_maw(ctx: Context, token: OAuthToken) -> Result(Nil, Nil) {
   let api_ctx = make_api_context(ctx, token)
   case start_mail_manager(api_ctx) {
     Ok(manager) -> {
       process.spawn(fn() { feed_maw(manager.data, api_ctx, None) })
-      Nil
+      Nil |> Ok
     }
-    Error(_) -> wisp.log_error("Unable to start mail manager")
+    Error(_) -> {
+      wisp.log_error("Unable to start mail manager")
+      Nil |> Error
+    }
   }
 }
 
@@ -87,6 +90,15 @@ fn handle_message(state: State, msg: Message) -> actor.Next(State, Message) {
           let failure_score =
             int.to_float(state.failures - state.successes)
             /. int.to_float(state.successes + state.failures)
+          wisp.log_info(
+            "Processing emails. "
+            <> int.to_string(state.successes)
+            <> " successes, "
+            <> int.to_string(state.failures)
+            <> " failures, "
+            <> float.to_string(failure_score)
+            <> " failure score.",
+          )
           case failure_score >. 0.6 {
             True -> {
               wisp.log_warning(
