@@ -35,7 +35,7 @@ pub type Work {
   )
 }
 
-pub fn create_table(conn: Connection) -> Result(Connection, Error) {
+pub fn create_table(conn: Connection) -> Result(Connection, Nil) {
   internal.create_table(
     conn,
     table_work,

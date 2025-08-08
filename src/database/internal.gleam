@@ -1,6 +1,7 @@
 import gleam/result
 import gleam/string
 import sqlight.{type Connection}
+import wisp
 
 /// General error type for database stuff
 pub type Error {
@@ -19,12 +20,12 @@ pub fn create_table(
   cols: List(String),
   without_rowid: Bool,
   // prefer false
-) -> Result(Connection, sqlight.Error) {
+) -> Result(Connection, Nil) {
   let query =
     "CREATE TABLE IF NOT EXISTS "
     <> name
     <> "("
-    <> string.join(cols, ",")
+    <> string.join(cols, ", ")
     <> ")"
   let query = case without_rowid {
     True -> query <> " WITHOUT ROWID"
@@ -32,4 +33,15 @@ pub fn create_table(
   }
   sqlight.exec(query, conn)
   |> result.map(fn(_) { conn })
+  |> result.map_error(fn(e) {
+    wisp.log_error(
+      "Unable to create table '"
+      <> name
+      <> "' with query\n"
+      <> query
+      <> "\ndue to error\n"
+      <> string.inspect(e),
+    )
+    Nil
+  })
 }

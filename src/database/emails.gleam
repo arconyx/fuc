@@ -17,9 +17,7 @@ pub type Email {
   Email(id: String, success: Bool)
 }
 
-pub fn create_table(
-  conn: sqlight.Connection,
-) -> Result(sqlight.Connection, sqlight.Error) {
+pub fn create_table(conn: sqlight.Connection) -> Result(sqlight.Connection, Nil) {
   internal.create_table(
     conn,
     table_email,

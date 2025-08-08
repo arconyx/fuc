@@ -28,9 +28,7 @@ fn oauth_token_from_sql() -> decode.Decoder(OAuthToken) {
 }
 
 /// Create table for storing oauth access tokens
-pub fn create_table(
-  conn: sqlight.Connection,
-) -> Result(sqlight.Connection, sqlight.Error) {
+pub fn create_table(conn: sqlight.Connection) -> Result(sqlight.Connection, Nil) {
   internal.create_table(
     conn,
     table_oauth_tokens,

@@ -34,8 +34,6 @@ pub fn main() {
   // There is no need for the secret key to be in the context
   let secret_key_base = state.get_env_var("FUC_SECRET_KEY")
 
-  wisp.log_info("Context loaded")
-
   case ctx, secret_key_base {
     Ok(ctx), Ok(secret_key_base) -> {
       // Using a let assert because it simplifies the logic and we

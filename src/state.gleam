@@ -14,7 +14,7 @@ pub type ContextError {
   MissingVariable(key: String)
   ParsingError(value: String)
   Impossible(wtf: String)
-  DatabaseInitError(err: database.Error)
+  DatabaseError
   SqlightError(err: sqlight.Error)
 }
 
@@ -79,7 +79,7 @@ pub fn load_context() -> Result(Context, ContextError) {
   use conn <- result.try(conn)
   let conn =
     database.create_database(conn)
-    |> result.map_error(fn(e) { DatabaseInitError(e) })
+    |> result.replace_error(DatabaseError)
   use conn <- result.try(conn)
 
   use ao3_label <- result.try(get_env_var("FUC_AO3_LABEL"))

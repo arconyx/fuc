@@ -35,9 +35,7 @@ fn oauth_state_from_sql() -> decode.Decoder(OAuthStateToken) {
 }
 
 /// Create the table used to store state tokens
-pub fn create_table(
-  conn: sqlight.Connection,
-) -> Result(sqlight.Connection, sqlight.Error) {
+pub fn create_table(conn: sqlight.Connection) -> Result(sqlight.Connection, Nil) {
   internal.create_table(
     conn,
     table_oauth_state,
