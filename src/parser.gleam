@@ -406,13 +406,19 @@ pub fn parse_email(
   }
 
   let decoder = {
-    use epoch_ms <- decode.field("internalDate", decode.int)
-    let time = epoch_ms / 1000 |> timestamp.from_unix_seconds()
+    use epoch_ms <- decode.field("internalDate", decode.string)
     use body <- decode.subfield(
       ["payload", "parts"],
       decode.at([0], part_decoder),
     )
-    #(body, time) |> decode.success
+    case int.parse(epoch_ms) {
+      Ok(ms) -> {
+        let time = ms / 1000 |> timestamp.from_unix_seconds()
+        #(body, time) |> decode.success
+      }
+      Error(_) ->
+        #("", timestamp.from_unix_seconds(0)) |> decode.failure("internalDate")
+    }
   }
 
   let email =
