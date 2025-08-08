@@ -80,6 +80,21 @@ type State {
   State(active: Set(String), ctx: APIContext, successes: Int, failures: Int)
 }
 
+fn calc_failure_score(state: State) -> Float {
+  int.to_float(state.failures - state.successes)
+  /. int.to_float(state.successes + state.failures)
+}
+
+fn create_progress_log(state: State, notice: String) -> String {
+  notice
+  <> int.to_string(state.successes)
+  <> " successes, "
+  <> int.to_string(state.failures)
+  <> " failures, "
+  <> state |> calc_failure_score |> float.to_string
+  <> " failure score."
+}
+
 /// Processes messages recieved by the maw
 fn handle_message(state: State, msg: Message) -> actor.Next(State, Message) {
   case msg {
@@ -87,18 +102,7 @@ fn handle_message(state: State, msg: Message) -> actor.Next(State, Message) {
       case set.contains(state.active, id) {
         True -> actor.continue(state)
         False -> {
-          let failure_score =
-            int.to_float(state.failures - state.successes)
-            /. int.to_float(state.successes + state.failures)
-          wisp.log_info(
-            "Processing emails. "
-            <> int.to_string(state.successes)
-            <> " successes, "
-            <> int.to_string(state.failures)
-            <> " failures, "
-            <> float.to_string(failure_score)
-            <> " failure score.",
-          )
+          let failure_score = calc_failure_score(state)
           case failure_score >. 0.6 {
             True -> {
               wisp.log_warning(
@@ -120,6 +124,8 @@ fn handle_message(state: State, msg: Message) -> actor.Next(State, Message) {
       }
     }
     Finish(id) -> {
+      create_progress_log(state, "Email processed: ")
+      |> wisp.log_info
       State(
         ..state,
         active: state.active |> set.delete(id),
@@ -379,7 +385,7 @@ fn feed_maw(
         Ok(resp) -> {
           case json.parse(resp.body, decoder) {
             Ok(#(messages, next_page)) -> {
-              list.map(messages, fn(id) { process_email(id, ctx, maw) })
+              list.map(messages, fn(id) { process.send(maw, Queue(id, maw)) })
               case next_page {
                 Some(next_page) -> feed_maw(maw, ctx, Some(next_page))
                 None -> wisp.log_info("All pages processed")
