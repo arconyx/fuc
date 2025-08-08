@@ -258,3 +258,28 @@ pub fn parse_updates_from_email_multiple_test() {
   assert expected2 == update2
   assert expected3 == update3
 }
+
+pub fn parse_updates_from_email_new_work_test() {
+  let expected =
+    parser.NewWork(
+      parser.DetailedWork(
+        123456,
+        "Title (1013 words)",
+        "ArcOnyx",
+        "1/14",
+        "Glee - Unit Testing",
+        "Not Rated",
+        "Choose Not To Use Archive Warnings",
+        None,
+        Some("Arbitary test summary."),
+      ),
+    )
+
+  let assert Ok(body) =
+    simplifile.read(data_path <> "email_body_new_work.txt")
+
+  let assert Ok(updates) = parser.parse_updates_from_email(body)
+
+  let assert [update] = updates
+  assert expected == update
+}

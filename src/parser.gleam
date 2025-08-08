@@ -754,6 +754,7 @@ fn extract_details(
   lines: List(String),
   next: fn(UpdateBuilder, List(String)) -> Result(UpdateBuilder, Error),
 ) -> Result(UpdateBuilder, Error) {
+  let lines = drop_empty_leading_lines(lines)
   case lines {
     [
       "Chapters: " <> chapters,
