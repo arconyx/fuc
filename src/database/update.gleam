@@ -44,9 +44,9 @@ pub fn create_table(conn: Connection) -> Result(Connection, Nil) {
     conn,
     table_update,
     [
-      "id INTEGER PRIMARY KEY",
-      "FOREIGN_KEY(work_id) REFERENCES work(id) NOT NULL", "chapter_id INTEGER",
+      "id INTEGER PRIMARY KEY", "work_id INTEGER NOT NULL", "chapter_id INTEGER",
       "title TEXT NOT NULL", "summary TEXT", "time INTEGER NOT NULL",
+      "FOREIGN KEY(work_id) REFERENCES work(id)",
     ],
     False,
   )
