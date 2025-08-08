@@ -357,7 +357,7 @@ const archive_email_header = "Archive of Our Own\n==============================
 fn strip_header(s: String) -> Result(String, Error) {
   case string.split_once(s, archive_email_header) {
     Ok(#(_, trimmed)) -> Ok(trimmed)
-    Error(_) -> Error(ParseError("Header not found"))
+    Error(_) -> Error(ParseError("Header not found. Email: \n" <> s))
   }
 }
 
@@ -787,8 +787,12 @@ fn extract_details(
             next(b, rest)
           })
         // Strip off optional tag lines if we don't have a series but do have a summary
-        [_, "", ..rest] | [_, _, "", ..rest] | [_, _, _, "", ..rest] ->
-          next(builder, rest)
+        [_, "", "Summary:", ..rest]
+        | [_, _, "", "Summary:", ..rest]
+        | [_, _, _, "", "Summary:", ..rest]
+        | [_, _, _, _, "", "Summary:", ..rest]
+        | [_, _, _, _, _, "", "Summary:", ..rest] ->
+          next(builder, ["Summary:", ..rest])
         // If we don't have an empty line in the first for then we can't havea
         // a summary, so we can just terminate.
         [_, ..] -> builder |> Ok
