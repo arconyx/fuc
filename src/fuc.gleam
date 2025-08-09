@@ -1,3 +1,8 @@
+import database/oauth/state as oauth_state
+import database/oauth/tokens.{type OAuthToken}
+import database/unified.{type WorkWithUpdateCount}
+import database/update.{type UpdateRow}
+import database/works.{type Work}
 import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/hackney
@@ -17,13 +22,10 @@ import gleam/uri
 import maw
 import mist
 import rate_limiter
+import sqlight
+import state.{type Context}
 import wisp.{type Request, type Response}
 import wisp/wisp_mist
-
-import database/oauth/state as oauth_state
-import database/oauth/tokens.{type OAuthToken}
-import database/unified.{type WorkWithUpdateCount}
-import state.{type Context}
 
 // ////////////// ENTRY POINT ///////////////
 
@@ -111,6 +113,7 @@ fn route_request(req: Request, ctx: Context) -> Response {
     ["auth", "google"] -> start_google_login(req, ctx)
     ["auth", "callback"] -> google_auth_callback(req, ctx)
     ["internal", "sync"] -> sync_inbox(req, ctx)
+    ["work", id] -> work_page(req, ctx, id)
     _ -> wisp.not_found()
   }
 }
@@ -129,6 +132,8 @@ fn work_to_list_item(work: WorkWithUpdateCount) -> String {
   <> " updates)</p>"
 }
 
+// TODO: Consider sorting by time instead of update count
+// Or just handle it on the frontend
 fn generate_work_list(ctx: Context) -> StringTree {
   case unified.select_works_with_updates(ctx.database_connection) {
     Ok(works) -> list.map(works, work_to_list_item) |> string_tree.from_strings
@@ -403,5 +408,121 @@ fn sync_inbox(req: Request, ctx: Context) -> Response {
   case maw.awaken_the_maw(ctx, token) {
     Ok(Nil) -> wisp.redirect("/")
     Error(Nil) -> wisp.internal_server_error()
+  }
+}
+
+fn handle_sql_error(e: sqlight.Error, msg: String) -> Response {
+  wisp.log_error(msg <> "\n" <> string.inspect(e))
+  wisp.internal_server_error()
+}
+
+fn work_to_html(work: Work) -> StringTree {
+  let html =
+    string_tree.from_strings([
+      "<h1>",
+      work.title,
+      "</h1>",
+      "<p> by ",
+      work.authors,
+      "</p>",
+      "<p> Chapters: ",
+      work.chapters,
+      "</p>",
+      "<p> Fandom: ",
+      work.fandom,
+      "</p>",
+      "<p> Rating: ",
+      work.rating,
+      "</p>",
+      "<p> Warnings: ",
+      work.warnings,
+      "</p>",
+    ])
+
+  let series = case work.series {
+    Some(series) -> string_tree.from_strings(["<p> Series: ", series, "</p>"])
+    None -> string_tree.new()
+  }
+
+  let summary = case work.summary {
+    Some(summary) ->
+      string_tree.from_strings(["<p> Summary: ", summary, "</p>"])
+    None -> string_tree.new()
+  }
+
+  html |> string_tree.append_tree(series) |> string_tree.append_tree(summary)
+}
+
+fn construct_update_url(up: UpdateRow) -> String {
+  let base = "https://archiveofourown.org/works/" <> int.to_string(up.work_id)
+
+  case up.chapter_id {
+    Some(id) -> base <> "/chapters/" <> int.to_string(id)
+    None -> base
+  }
+}
+
+// I recognise I'm being very inconsistent with ways of constructing html in this file
+// I'm just experimenting to see what I like best
+// There's a note in the string_tree docs that regular string concat may be faster
+// on erlang than string trees
+fn update_to_html(up: UpdateRow) -> String {
+  let html =
+    "<h3><a href='"
+    <> construct_update_url(up)
+    <> "'>"
+    <> up.title
+    <> "</a></h3>"
+
+  case up.summary {
+    Some(summary) -> html <> "<p>" <> summary <> "</p>"
+    None -> html
+  }
+}
+
+fn work_page(req: Request, ctx: Context, id: String) -> Response {
+  use <- wisp.require_method(req, http.Get)
+
+  case int.parse(id) {
+    Ok(id) -> {
+      case works.select_works([id], ctx.database_connection) {
+        Ok([work]) ->
+          case update.select_updates_for_work(id, ctx.database_connection) {
+            Ok(updates) -> {
+              let html =
+                work_to_html(work)
+                |> string_tree.append_tree(
+                  string_tree.from_strings([
+                    "<h2>Updates</h2>",
+                    ..list.map(updates, update_to_html)
+                  ]),
+                )
+
+              wisp.ok()
+              |> wisp.html_body(html)
+            }
+            Error(e) ->
+              handle_sql_error(
+                e,
+                "Error fetching updates for work " <> int.to_string(id) <> ":",
+              )
+          }
+        Ok([]) -> wisp.not_found()
+        Ok([_, ..]) -> {
+          wisp.log_error(
+            "Somehow got multiple works with the same id ("
+            <> int.to_string(id)
+            <> "), wtf.",
+          )
+          wisp.internal_server_error()
+        }
+        Error(e) ->
+          handle_sql_error(
+            e,
+            "Error fetching work " <> int.to_string(id) <> ":",
+          )
+      }
+    }
+    Error(_) -> wisp.not_found()
   }
 }

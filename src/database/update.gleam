@@ -114,9 +114,19 @@ pub fn select_updates_for_work(
   conn: Connection,
 ) -> Result(List(UpdateRow), Error) {
   select.new()
-  |> select.select_cols(["id", "work_id", "chapter_id", "title", "summary"])
+  |> select.select_cols([
+    "id",
+    "work_id",
+    "chapter_id",
+    "title",
+    "summary",
+    "time",
+  ])
   |> select.from_table(table_update)
   |> select.where(where.col("work_id") |> where.eq(where.int(work_id)))
+  |> select.order_by_desc("time")
+  |> select.order_by_desc("title")
+  // hack to order by chapter number
   |> select.to_query
   |> sqlite.run_read_query(update_from_sql(), conn)
 }
