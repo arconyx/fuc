@@ -477,7 +477,7 @@ fn update_to_html(up: UpdateRow) -> String {
   let html =
     "<h3><a href='"
     <> construct_update_url(up)
-    <> "'>"
+    <> "' target='_blank'>"
     <> up.title
     <> "</a></h3>"
 
