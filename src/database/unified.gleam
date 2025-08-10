@@ -26,19 +26,12 @@ fn update_count_from_sql() -> Decoder(WorkWithUpdateCount) {
 }
 
 pub fn select_works_with_updates(conn: Connection) -> Result(_, Error) {
-  // let j =
-  //   join.table(update.table_update)
-  //   |> join.inner(
-  //     where.col(works.table_work <> ".id")
-  //       |> where.eq(where.col(update.table_update <> ".work_id")),
-  //     "up",
-  //   )
-
   let subq =
     select.new()
     |> select.from_table(update.table_update)
     |> select.select_col("work_id")
     |> select.select(select.col("COUNT(*)") |> select.alias("update_count"))
+    |> select.select(select.col("MAX(time)") |> select.alias("update_time"))
     |> select.group_by("work_id")
     |> select.to_query()
 
@@ -56,6 +49,7 @@ pub fn select_works_with_updates(conn: Connection) -> Result(_, Error) {
     [".id", ".title", ".authors"] |> prefix_strings(works.table_work),
   )
   |> select.select_col("up.update_count")
+  |> select.order_by_desc("up.update_time")
   |> select.order_by_desc("up.update_count")
   |> select.to_query()
   |> sqlite.run_read_query(update_count_from_sql(), conn)
