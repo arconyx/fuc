@@ -114,6 +114,9 @@ fn route_request(req: Request, ctx: Context) -> Response {
     ["auth", "callback"] -> google_auth_callback(req, ctx)
     ["internal", "sync"] -> sync_inbox(req, ctx)
     ["work", id] -> work_page(req, ctx, id)
+    ["work", id, "read"] -> delete_all_updates_for_work(req, ctx, id)
+    ["work", work_id, "update", update_id, "read"] ->
+      delete_update(req, ctx, work_id:, update_id:)
     _ -> wisp.not_found()
   }
 }
@@ -437,17 +440,21 @@ fn work_to_html(work: Work) -> StringTree {
       "<p> Warnings: ",
       work.warnings,
       "</p>",
+      "<form action='/work/",
+      int.to_string(work.id),
+      "/read?_method=DELETE' method='POST'><button type='submit'>Mark all read</button></form>",
     ])
 
   let series = case work.series {
-    Some(series) -> string_tree.from_strings(["<p> Series: ", series, "</p>"])
-    None -> string_tree.new()
+    Some(series) if series != "" ->
+      string_tree.from_strings(["<p> Series: ", series, "</p>"])
+    _ -> string_tree.new()
   }
 
   let summary = case work.summary {
-    Some(summary) ->
+    Some(summary) if summary != "" ->
       string_tree.from_strings(["<p> Summary: ", summary, "</p>"])
-    None -> string_tree.new()
+    _ -> string_tree.new()
   }
 
   html |> string_tree.append_tree(series) |> string_tree.append_tree(summary)
@@ -474,17 +481,25 @@ fn update_to_html(up: UpdateRow) -> String {
     <> up.title
     <> "</a></h3>"
 
-  case up.summary {
-    Some(summary) -> html <> "<p>" <> summary <> "</p>"
+  let html = case up.summary {
+    Some(summary) -> html <> "<p>" <> summary
     None -> html
   }
+
+  html
+  <> "</p>"
+  <> "<form action='/work/"
+  <> int.to_string(up.work_id)
+  <> "/update/"
+  <> int.to_string(up.id)
+  <> "/read?_method=DELETE' method='POST'><button type='submit'>Mark read</button></form>"
 }
 
 fn work_page(req: Request, ctx: Context, id: String) -> Response {
   use <- wisp.require_method(req, http.Get)
 
   case int.parse(id) {
-    Ok(id) -> {
+    Ok(id) ->
       case works.select_works([id], ctx.database_connection) {
         Ok([work]) ->
           case update.select_updates_for_work(id, ctx.database_connection) {
@@ -522,7 +537,39 @@ fn work_page(req: Request, ctx: Context, id: String) -> Response {
             "Error fetching work " <> int.to_string(id) <> ":",
           )
       }
-    }
+
     Error(_) -> wisp.not_found()
+  }
+}
+
+fn delete_update(
+  req: Request,
+  ctx: Context,
+  work_id work_id_str: String,
+  update_id update_id_str: String,
+) {
+  use <- wisp.require_method(req, http.Delete)
+  // DON'T MIX UP THE IDS
+
+  case int.parse(work_id_str), int.parse(update_id_str) {
+    Ok(work_id), Ok(update_id) ->
+      case update.delete_update(ctx.database_connection, work_id:, update_id:) {
+        Error(_) -> wisp.internal_server_error()
+        Ok(_) -> wisp.redirect("/work/" <> work_id_str)
+      }
+    _, _ -> wisp.not_found()
+  }
+}
+
+fn delete_all_updates_for_work(req: Request, ctx: Context, work_id: String) {
+  use <- wisp.require_method(req, http.Delete)
+
+  case int.parse(work_id) {
+    Ok(work_id) ->
+      case update.delete_updates_for_work(work_id, ctx.database_connection) {
+        Error(_) -> wisp.internal_server_error()
+        Ok(_) -> wisp.redirect("/")
+      }
+    __ -> wisp.not_found()
   }
 }

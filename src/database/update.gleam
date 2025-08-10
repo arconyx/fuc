@@ -1,4 +1,5 @@
 import cake/adapter/sqlite
+import cake/delete
 import cake/insert.{type InsertRow, type InsertValue}
 import cake/select
 import cake/where
@@ -6,10 +7,13 @@ import database/internal
 import database/works
 import gleam/dynamic/decode
 import gleam/float
+import gleam/int
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import gleam/time/timestamp.{type Timestamp}
 import sqlight.{type Connection, type Error}
+import wisp
 
 pub const table_update = "updates"
 
@@ -129,4 +133,100 @@ pub fn select_updates_for_work(
   // hack to order by chapter number
   |> select.to_query
   |> sqlite.run_read_query(update_from_sql(), conn)
+}
+
+// I wanted to make the first arg an UpdateRow but the caller
+// only gets the id from the url
+pub fn delete_update(
+  conn: Connection,
+  work_id work_id: Int,
+  update_id update_id: Int,
+) -> Result(List(UpdateRow), Error) {
+  let q =
+    delete.new()
+    |> delete.table(table_update)
+    |> delete.where(
+      where.and([
+        where.col("id") |> where.eq(where.int(update_id)),
+        where.col("work_id") |> where.eq(where.int(work_id)),
+      ]),
+    )
+    |> delete.returning([
+      "id",
+      "work_id",
+      "chapter_id",
+      "title",
+      "summary",
+      "time",
+    ])
+    |> delete.to_query
+    |> sqlite.run_write_query(update_from_sql(), conn)
+
+  case q {
+    Ok([update]) -> {
+      wisp.log_info("Deleted update:\n" <> string.inspect(update))
+      Ok([update])
+    }
+    Ok([]) -> {
+      wisp.log_warning(
+        "Tried to delete update "
+        <> int.to_string(update_id)
+        <> " from work "
+        <> int.to_string(work_id)
+        <> " but no matching updates found",
+      )
+      Ok([])
+    }
+    Ok(updates) -> {
+      wisp.log_critical(
+        "Deleted multiple works instead of only one!\nUpdate id: "
+        <> int.to_string(update_id)
+        <> ", work id: "
+        <> int.to_string(work_id)
+        <> "\nUpdates:\n"
+        <> string.inspect(updates),
+      )
+      // TODO: Handle this better
+      // We can't panic since systemd will just restart it.
+      Ok(updates)
+    }
+    Error(e) -> Error(e)
+  }
+}
+
+pub fn delete_updates_for_work(
+  work_id: Int,
+  conn: Connection,
+) -> Result(List(UpdateRow), Error) {
+  let q =
+    delete.new()
+    |> delete.table(table_update)
+    |> delete.where(where.col("work_id") |> where.eq(where.int(work_id)))
+    |> delete.returning([
+      "id",
+      "work_id",
+      "chapter_id",
+      "title",
+      "summary",
+      "time",
+    ])
+    |> delete.to_query
+    |> sqlite.run_write_query(update_from_sql(), conn)
+
+  case q {
+    Ok([]) -> {
+      wisp.log_warning(
+        "Tried to delete updates for work "
+        <> int.to_string(work_id)
+        <> " but no matching updates found",
+      )
+      Ok([])
+    }
+
+    Ok(updates) -> {
+      wisp.log_info("Deleted updates:\n" <> string.inspect(updates))
+      Ok(updates)
+    }
+    Error(e) -> Error(e)
+  }
 }
