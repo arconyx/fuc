@@ -1,7 +1,7 @@
 {
   # I'd prefer nixpkgs-unstable but rebar3 is currently broken there
   # It's fixed, we're just waiting on hydra to catch up
-  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
 
   outputs =
     { nixpkgs, ... }:
