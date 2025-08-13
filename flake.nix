@@ -6,16 +6,23 @@
   outputs =
     { nixpkgs, ... }:
     let
-      pkgs = import nixpkgs { system = "x86_64-linux"; };
+      lib = nixpkgs.lib;
+      forEachSystem =
+        f: lib.genAttrs lib.systems.flakeExposed (system: f nixpkgs.legacyPackages.${system});
     in
     {
-      devShells.x86_64-linux.default = pkgs.mkShell {
-        packages = with pkgs; [
-          gleam
-          erlang_27
-          beam27Packages.rebar3
-          litecli
-        ];
-      };
+      devShells = forEachSystem (pkgs: {
+        default = pkgs.mkShell {
+          packages = with pkgs; [
+            gleam
+            erlang_27
+            beam27Packages.rebar3
+            litecli
+          ];
+        };
+      });
+      packages = forEachSystem (pkgs: {
+        default = pkgs.callPackage ./package.nix { };
+      });
     };
 }
