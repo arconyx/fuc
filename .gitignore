@@ -7,3 +7,4 @@ erl_crash.dump
 email*.json
 batch_subscription_notification.text.erb
 sample_email*.txt
+result
