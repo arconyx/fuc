@@ -19,6 +19,7 @@ import gleam/string_tree.{type StringTree}
 import gleam/time/duration
 import gleam/time/timestamp
 import gleam/uri
+import glenvy/env
 import maw
 import mist
 import rate_limiter
@@ -36,7 +37,8 @@ pub fn main() {
 
   let ctx = state.load_context()
   // There is no need for the secret key to be in the context
-  let secret_key_base = state.get_env_var("FUC_SECRET_KEY")
+  let secret_key_base =
+    env.string("FUC_SECRET_KEY") |> result.map_error(state.EnvError)
 
   case ctx, secret_key_base {
     Ok(ctx), Ok(secret_key_base) -> {
@@ -48,7 +50,7 @@ pub fn main() {
         |> wisp_mist.handler(secret_key_base)
         |> mist.new()
         |> mist.bind("localhost")
-        |> mist.port(8000)
+        |> mist.port(ctx.port)
         |> mist.start()
 
       case server {

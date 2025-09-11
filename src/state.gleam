@@ -1,11 +1,12 @@
 import database/database
-import envoy
 import gleam/erlang/process
-import gleam/int
 import gleam/result
 import gleam/string
+import glenvy/dotenv
+import glenvy/env
 import rate_limiter
 import sqlight
+import wisp
 
 // /////////////// SERVER CONFIGURATION ///////////////////////
 
@@ -16,6 +17,7 @@ pub type ContextError {
   Impossible(wtf: String)
   DatabaseError
   SqlightError(err: sqlight.Error)
+  EnvError(env.Error)
 }
 
 /// Context for server invocation
@@ -47,21 +49,40 @@ pub type OAuthClient {
 /// This calls create_database because it should be an error to have
 /// a context with an invalid database referenced.
 pub fn load_context() -> Result(Context, ContextError) {
+  // First load environment variables from systemd credentials, if present
+  case env.string("CREDENTIALS_DIRECTORY") {
+    Ok(dir) ->
+      case dotenv.load_from(dir <> "/fuc.env") {
+        Ok(_) ->
+          wisp.log_info(
+            "Loaded credentials file from ${CREDENTIALS_DIRECTORY}/fuc.env",
+          )
+        Error(e) ->
+          wisp.log_error(
+            "Unable to read credentials file from ${CREDENTIALS_DIRECTORY}/fuc.env: \n"
+            <> string.inspect(e),
+          )
+      }
+    Error(env.NotFound(n)) -> wisp.log_debug("$" <> n <> " not found")
+    Error(env.FailedToParse(n)) -> wisp.log_error("Unable to parse $" <> n)
+  }
+
   // OAuth information gets a special type
   // This is probably overkill tbh
-  use id <- result.try(get_env_var("FUC_OAUTH_CLIENT_ID"))
-  use secret <- result.try(get_env_var("FUC_OAUTH_CLIENT_SECRET"))
+  use id <- result.try(
+    env.string("FUC_OAUTH_CLIENT_ID") |> result.map_error(EnvError),
+  )
+  use secret <- result.try(
+    env.string("FUC_OAUTH_CLIENT_SECRET") |> result.map_error(EnvError),
+  )
   let client = OAuthClient(id, secret)
 
-  use port_str <- result.try(get_env_var("FUC_PORT"))
-  let port = case int.parse(port_str) {
-    Ok(i) -> Ok(i)
-    Error(_) -> Error(ParsingError("Cannot parse port '" <> port_str <> "'"))
-  }
-  use port <- result.try(port)
+  use port <- result.try(env.int("FUC_PORT") |> result.map_error(EnvError))
 
   // We drop any trailing slashes from the address
-  use addr <- result.try(get_env_var("FUC_ADDRESS"))
+  use addr <- result.try(
+    env.string("FUC_ADDRESS") |> result.map_error(EnvError),
+  )
   let addr = case string.last(addr) {
     Ok("/") -> Ok(string.drop_end(addr, 1))
     Ok(_) -> Ok(addr)
@@ -73,7 +94,26 @@ pub fn load_context() -> Result(Context, ContextError) {
   use addr <- result.try(addr)
 
   // Create the database as soon as we know what it is called
-  use database_path <- result.try(get_env_var("FUC_DATABASE_PATH"))
+  // If we're running under systemd we use the STATE_DIRECTORY environment variable
+  let database_path = {
+    case env.string("STATE_DIRECTORY") {
+      Ok(state_dir) -> {
+        let first_dir = case string.split_once(state_dir, on: "/") {
+          Ok(#(first, _)) -> first
+          Error(Nil) -> state_dir
+        }
+        wisp.log_info(
+          "Using systemd STATE_DIRECTORY for database (" <> state_dir <> ")",
+        )
+        Ok("file:" <> first_dir <> "/fuc.sqlite")
+      }
+      Error(env.NotFound(_)) ->
+        env.string("FUC_DATABASE_PATH") |> result.map_error(EnvError)
+      Error(e) -> Error(EnvError(e))
+    }
+  }
+  use database_path <- result.try(database_path)
+
   let conn =
     sqlight.open(database_path) |> result.map_error(fn(e) { SqlightError(e) })
   use conn <- result.try(conn)
@@ -82,20 +122,11 @@ pub fn load_context() -> Result(Context, ContextError) {
     |> result.replace_error(DatabaseError)
   use conn <- result.try(conn)
 
-  use ao3_label <- result.try(get_env_var("FUC_AO3_LABEL"))
+  use ao3_label <- result.try(
+    env.string("FUC_AO3_LABEL") |> result.map_error(EnvError),
+  )
 
   let rl_name = process.new_name("rate_limiter")
 
   Context(client, addr, port, conn, ao3_label, rl_name) |> Ok
-}
-
-/// Get an environment variable
-/// Wraps envoy.get() with a more helpful error
-/// Empty environment variables are treated as an error
-pub fn get_env_var(name: String) -> Result(String, ContextError) {
-  case envoy.get(name) {
-    Ok("") -> Error(MissingVariable(name))
-    Ok(val) -> Ok(val)
-    Error(_) -> Error(MissingVariable(name))
-  }
 }
