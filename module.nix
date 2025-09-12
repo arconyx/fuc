@@ -38,6 +38,7 @@
   config =
     let
       cfg = config.services.fuc;
+      internal_port = "98124";
     in
     lib.mkIf cfg.enable {
       systemd.services =
@@ -59,12 +60,12 @@
               DynamicUser = true;
               CapabilityBoundingSet = "";
               StateDirectory = "fuc";
-              LoadCredentials = "fuc.env:${cfg.credentialsFile}";
+              LoadCredential = "fuc.env:${cfg.credentialsFile}";
             };
 
             environment = {
               FUC_ADDRESS = cfg.address;
-              FUC_PORT = builtins.toString cfg.port;
+              FUC_PORT = internal_port;
               # Don't need FUC_DATABASE_PATH because we have special systemd handling to read STATE_DIRECTORY
             };
           };
@@ -83,7 +84,7 @@
 
             serviceConfig = {
               Type = "notify";
-              ExecStart = "${pkgs.systemd}/lib/systemd-socket-proxyd localhost:${builtins.toString cfg.port} --exit-idle-time 600";
+              ExecStart = "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd localhost:${internal_port} --exit-idle-time 600";
               PrivateTmp = true;
               PrivateNetwork = true;
             };
@@ -91,10 +92,10 @@
 
         };
 
-      systemd.sockets.proxy-fun = {
+      systemd.sockets.proxy-fuc = {
         enable = true;
         description = "Public socket for the Fic Update Collator";
-        listenStreams = [ "localhost:${builtins.toString cfg.port}" ];
+        listenStreams = [ "127.0.0.1:${builtins.toString cfg.port}" ];
         wantedBy = [ "sockets.target" ];
       };
     };

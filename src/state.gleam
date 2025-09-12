@@ -63,7 +63,10 @@ pub fn load_context() -> Result(Context, ContextError) {
             <> string.inspect(e),
           )
       }
-    Error(env.NotFound(n)) -> wisp.log_debug("$" <> n <> " not found")
+    Error(env.NotFound(n)) ->
+      wisp.log_info(
+        "$" <> n <> " not found,falling back to environment variables",
+      )
     Error(env.FailedToParse(n)) -> wisp.log_error("Unable to parse $" <> n)
   }
 
