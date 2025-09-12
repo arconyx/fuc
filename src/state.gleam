@@ -101,7 +101,7 @@ pub fn load_context() -> Result(Context, ContextError) {
   let database_path = {
     case env.string("STATE_DIRECTORY") {
       Ok(state_dir) -> {
-        let first_dir = case string.split_once(state_dir, on: "/") {
+        let first_dir = case string.split_once(state_dir, on: ":") {
           Ok(#(first, _)) -> first
           Error(Nil) -> state_dir
         }
