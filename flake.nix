@@ -22,5 +22,6 @@
       packages = forEachSystem (pkgs: {
         default = pkgs.callPackage ./package.nix { };
       });
+      nixosModules.default = import ./module.nix;
     };
 }
