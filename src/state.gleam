@@ -117,6 +117,8 @@ pub fn load_context() -> Result(Context, ContextError) {
   }
   use database_path <- result.try(database_path)
 
+  wisp.log_info("Using database path " <> database_path)
+
   let conn =
     sqlight.open(database_path) |> result.map_error(fn(e) { SqlightError(e) })
   use conn <- result.try(conn)
