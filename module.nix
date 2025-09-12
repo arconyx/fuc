@@ -59,7 +59,7 @@
               DynamicUser = true;
               CapabilityBoundingSet = "";
               StateDirectory = "fuc";
-              LoadCredentials = "fuc.env:${cfg.credentials}";
+              LoadCredentials = "fuc.env:${cfg.credentialsFile}";
             };
 
             environment = {
