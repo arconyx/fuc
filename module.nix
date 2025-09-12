@@ -68,27 +68,27 @@
               # Don't need FUC_DATABASE_PATH because we have special systemd handling to read STATE_DIRECTORY
             };
           };
-        };
 
-      proxy-fuc = {
-        enable = true;
-        description = "Socket activation proxy for the Fic Update Collator";
-        requires = [
-          "fuc.service"
-          "proxy-fuc.socket"
-        ];
-        after = [
-          "fuc.service"
-          "proxy-fuc.socket"
-        ];
+          proxy-fuc = {
+            enable = true;
+            description = "Socket activation proxy for the Fic Update Collator";
+            requires = [
+              "fuc.service"
+              "proxy-fuc.socket"
+            ];
+            after = [
+              "fuc.service"
+              "proxy-fuc.socket"
+            ];
+          };
 
-        serviceConfig = {
-          Type = "notify";
-          ExecStart = "${pkgs.systemd}/lib/systemd-socket-proxyd localhost:${builtins.toString cfg.port} --exit-idle-time 600";
-          PrivateTmp = true;
-          PrivateNetwork = true;
+          serviceConfig = {
+            Type = "notify";
+            ExecStart = "${pkgs.systemd}/lib/systemd-socket-proxyd localhost:${builtins.toString cfg.port} --exit-idle-time 600";
+            PrivateTmp = true;
+            PrivateNetwork = true;
+          };
         };
-      };
 
       systemd.sockets.proxy-fun = {
         enable = true;
