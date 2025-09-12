@@ -38,7 +38,7 @@
   config =
     let
       cfg = config.services.fuc;
-      internal_port = "98124";
+      internal_port = "8000";
     in
     lib.mkIf cfg.enable {
       systemd.services =
@@ -84,9 +84,8 @@
 
             serviceConfig = {
               Type = "notify";
-              ExecStart = "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd localhost:${internal_port} --exit-idle-time 600";
+              ExecStart = "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd 127.0.0.1:${internal_port} --exit-idle-time 600";
               PrivateTmp = true;
-              PrivateNetwork = true;
             };
           };
 
