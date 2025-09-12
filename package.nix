@@ -3,11 +3,11 @@
   lib,
   gleam,
   erlang,
-  beamPackages,
+  beamMinimalPackages,
   makeWrapper,
 }:
 let
-  inherit (beamPackages)
+  inherit (beamMinimalPackages)
     rebar3WithPlugins
     fetchHex
     ;
@@ -42,7 +42,7 @@ stdenv.mkDerivation {
     erlang
     makeWrapper
     (rebar3WithPlugins {
-      plugins = with beamPackages; [ pc ];
+      plugins = with beamMinimalPackages; [ pc ];
     })
   ];
 
