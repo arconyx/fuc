@@ -80,14 +80,15 @@
               "fuc.service"
               "proxy-fuc.socket"
             ];
+
+            serviceConfig = {
+              Type = "notify";
+              ExecStart = "${pkgs.systemd}/lib/systemd-socket-proxyd localhost:${builtins.toString cfg.port} --exit-idle-time 600";
+              PrivateTmp = true;
+              PrivateNetwork = true;
+            };
           };
 
-          serviceConfig = {
-            Type = "notify";
-            ExecStart = "${pkgs.systemd}/lib/systemd-socket-proxyd localhost:${builtins.toString cfg.port} --exit-idle-time 600";
-            PrivateTmp = true;
-            PrivateNetwork = true;
-          };
         };
 
       systemd.sockets.proxy-fun = {
