@@ -524,7 +524,7 @@ fn parse_update_work(lines: List(String)) {
 /// The second line is expected to be blank.
 /// e.g.
 /// ```
-/// http://archiveofourown.org/works/12345/chapters/6789
+/// https://archiveofourown.org/works/12345/chapters/6789
 ///
 /// ...
 /// ```
@@ -538,7 +538,8 @@ fn extract_chapter_url(
   next: fn(UpdateBuilder, List(String)) -> Result(UpdateBuilder, Error),
 ) -> Result(UpdateBuilder, Error) {
   case lines {
-    ["http://archiveofourown.org/works/" <> url, "", ..rest] -> {
+    ["http://archiveofourown.org/works/" <> url, "", ..rest]
+    | ["https://archiveofourown.org/works/" <> url, "", ..rest] -> {
       case string.split(url, "/") {
         [work_id, "chapters", chapter_id] -> {
           case int.parse(work_id), int.parse(chapter_id) {
@@ -570,7 +571,7 @@ fn extract_chapter_url(
 /// The second line is expected to be blank.
 /// e.g.
 /// ```
-/// http://archiveofourown.org/works/12345
+/// https://archiveofourown.org/works/12345
 ///
 /// ...
 /// ```
@@ -584,7 +585,8 @@ fn extract_work_url(
   next: fn(UpdateBuilder, List(String)) -> Result(UpdateBuilder, Error),
 ) -> Result(UpdateBuilder, Error) {
   case lines {
-    ["http://archiveofourown.org/works/" <> work_id, "", ..rest] -> {
+    ["http://archiveofourown.org/works/" <> work_id, "", ..rest]
+    | ["https://archiveofourown.org/works/" <> work_id, "", ..rest] -> {
       case int.parse(work_id) {
         Ok(work_id) ->
           builder
@@ -676,7 +678,9 @@ fn extract_authors(
   case lines {
     ["by " <> authors, "", ..rest] ->
       case
-        regexp.from_string("\\Q (http://archiveofourown.org/users/\\E\\S+\\)")
+        regexp.from_string(
+          "\\Q (http\\Es?\\Q://archiveofourown.org/users/\\E\\S+\\)",
+        )
       {
         Ok(re) ->
           regexp.replace(re, authors, "")
