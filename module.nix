@@ -54,6 +54,8 @@
 
             confinement.enable = true;
 
+            unitConfig.StopWhenUnneeded = true;
+
             serviceConfig = {
               ExecStart = "${fuc}/bin/fuc";
 
