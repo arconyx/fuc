@@ -54,7 +54,13 @@ pub fn main() {
         |> mist.start()
 
       case server {
-        Ok(_) -> process.sleep_forever()
+        Ok(_) -> {
+          // Notify systemd watchdog
+          // This is a noop if we aren't running under systemd
+          notify_ready()
+          // Keep main process alive
+          process.sleep_forever()
+        }
         Error(e) -> {
           wisp.log_critical("Unable to start server: " <> string.inspect(e))
         }
@@ -80,6 +86,9 @@ pub fn main() {
   process.sleep(500)
   // give logging a chance to finish
 }
+
+@external(erlang, "fuc_ffi", "notify_ready")
+fn notify_ready() -> Nil
 
 // /////////// REQUEST HANDLING ///////////////
 

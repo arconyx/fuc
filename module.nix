@@ -51,12 +51,16 @@
             description = "Fic update collator";
             requires = [ "network-online.target" ];
             after = [ "network-online.target" ];
+            path = [ pkgs.systemd ];
 
             confinement.enable = true;
 
             unitConfig.StopWhenUnneeded = true;
 
             serviceConfig = {
+              Type = "notify";
+              NotifyAccess = "all";
+
               ExecStart = "${fuc}/bin/fuc";
 
               DynamicUser = true;
