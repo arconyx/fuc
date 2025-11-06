@@ -277,7 +277,7 @@ fn process_email(id: String, ctx: APIContext, manager: Subject(Message)) -> Nil 
               // If we can't parse the email then there's no point trying again
               case e {
                 parser.ParseError(s) ->
-                  wisp.log_error("Unable to parse email: " <> s)
+                  wisp.log_error("Unable to parse email:\n" <> s)
                 parser.BuilderError(s) ->
                   wisp.log_error(
                     "Unable to build email from parsed data: " <> s,

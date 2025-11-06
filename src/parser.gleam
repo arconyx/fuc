@@ -478,7 +478,7 @@ fn parse_update(blob: String) -> Result(ArchiveUpdate, Error) {
             "Unable to parse title from: "
             <> line
             <> "\nIn email:\n"
-            <> string.inspect(lines),
+            <> string.join(lines, with: "\n"),
           ))
       }
     }
@@ -560,7 +560,9 @@ fn extract_chapter_url(
       }
     }
     _ ->
-      ParseError("Invalid list when seeking url: " <> string.inspect(lines))
+      ParseError(
+        "Invalid list when seeking url:\n" <> string.join(lines, with: "\n"),
+      )
       |> Error
   }
 }
@@ -814,7 +816,9 @@ fn extract_details(
     // a sparse work
     [] -> builder |> Ok
     _ ->
-      ParseError("Invalid work details found: " <> string.inspect(lines))
+      ParseError(
+        "Invalid work details found:\n" <> string.join(lines, with: "\n"),
+      )
       |> Error
   }
 }
@@ -840,7 +844,9 @@ fn extract_work_summary(
     }
     // Empty list, no summary, all good
     [] -> builder |> Ok
-    _ -> ParseError("Invalid work summary: " <> string.inspect(lines)) |> Error
+    _ ->
+      ParseError("Invalid work summary:\n" <> string.join(lines, with: "\n"))
+      |> Error
   }
 }
 
