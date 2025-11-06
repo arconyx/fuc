@@ -181,8 +181,7 @@ fn home_page(req: Request, ctx: Context) -> Response {
 
   let body =
     string_tree.from_string(
-      "<p>Hello World</p>
-      <form action='/internal/sync' method='POST'>
+      "<form action='/internal/sync' method='POST'>
         <button type='submit'>Sync</button>
       </form>",
     )
