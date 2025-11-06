@@ -17,7 +17,7 @@ line chapter summary
 Chapters: 3/?
 Fandom: Glee - Unit Testing
 Rating: General
-Warnings: Choose Not To Use Archive Warnings
+Warning: Choose Not To Use Archive Warnings
 
 Additional Tags: Author feels proud that he's writing tests for once
 

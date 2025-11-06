@@ -779,7 +779,7 @@ fn extract_details(
       "Chapters: " <> chapters,
       "Fandom: " <> fandom,
       "Rating: " <> rating,
-      "Warnings: " <> warnings,
+      "Warning: " <> warnings,
       ..rest
     ] -> {
       let builder = set_details(builder, chapters, fandom, rating, warnings)
