@@ -120,7 +120,6 @@ fn route_request(req: Request, ctx: Context) -> Response {
   case wisp.path_segments(req) {
     // matches `/`
     [] -> home_page(req, ctx)
-    ["login"] -> login_page(req, ctx)
     ["auth", "google"] -> start_google_login(req, ctx)
     ["auth", "callback"] -> google_auth_callback(req, ctx)
     ["internal", "sync"] -> sync_inbox(req, ctx)
@@ -180,26 +179,16 @@ fn home_page(req: Request, ctx: Context) -> Response {
   }
 
   let body =
-    string_tree.from_string(
-      "<form action='/internal/sync' method='POST'>
+    string_tree.from_strings([
+      "<a href='",
+      ctx.address,
+      "/auth/google'>Login with Google</a>",
+      "<form style='margin: 16px;' action='/internal/sync' method='POST'>
         <button type='submit'>Sync</button>
-      </form>",
-    )
+        </form>",
+    ])
     |> string_tree.append_tree(status)
     |> string_tree.append_tree(generate_work_list(ctx))
-
-  wisp.ok()
-  |> wisp.html_body(body)
-}
-
-/// Landing page to prompt for user auth
-fn login_page(req: Request, ctx: Context) -> Response {
-  use <- wisp.require_method(req, http.Get)
-
-  let body =
-    string_tree.from_string(
-      "<a href='" <> ctx.address <> "/auth/google'>Login with Google</a>",
-    )
 
   wisp.ok()
   |> wisp.html_body(body)
