@@ -45,6 +45,10 @@ pub fn awaken_the_maw(ctx: Context, token: OAuthToken) -> Result(Nil, Nil) {
   }
 }
 
+pub type QueueStatus {
+  QueueStatus(active: Int, successes: Int, failures: Int)
+}
+
 type Message {
   /// Queue an email for processing
   Queue(id: String, manager: Subject(Message))
@@ -58,6 +62,8 @@ type Message {
   Cancel(id: String)
   /// Shutdown all processing
   Die
+  /// Get queue data
+  GetStatus(reply: Subject(QueueStatus))
 }
 
 type APIContext {
@@ -73,11 +79,18 @@ fn make_api_context(ctx: Context, token: OAuthToken) -> APIContext {
   APIContext(ctx.database_connection, ctx.ao3_label, ctx.rate_limiter, token)
 }
 
-// TODO: Modify actor so we can extract progress information
-// Probably track size(active) as a state property?
-// We could just use list.length(active) but that is O(n)
 type State {
-  State(active: Set(String), ctx: APIContext, successes: Int, failures: Int)
+  State(
+    active: Set(String),
+    ctx: APIContext,
+    /// Number of messages being processed
+    processing: Int,
+    /// Number of messages successfully processed
+    successes: Int,
+    /// Number of failures encountered during processing.
+    /// One message may fail multiple times.
+    failures: Int,
+  )
 }
 
 fn calc_failure_score(state: State) -> Float {
@@ -116,7 +129,11 @@ fn handle_message(state: State, msg: Message) -> actor.Next(State, Message) {
             }
             False -> {
               spawn_email_worker(id, state.ctx, self)
-              State(..state, active: state.active |> set.insert(id))
+              State(
+                ..state,
+                active: state.active |> set.insert(id),
+                processing: state.processing + 1,
+              )
               |> actor.continue
             }
           }
@@ -130,6 +147,7 @@ fn handle_message(state: State, msg: Message) -> actor.Next(State, Message) {
         ..state,
         active: state.active |> set.delete(id),
         successes: state.successes + 1,
+        processing: state.processing - 1,
       )
       |> actor.continue
     }
@@ -143,22 +161,36 @@ fn handle_message(state: State, msg: Message) -> actor.Next(State, Message) {
         ..state,
         active: state.active |> set.delete(id),
         failures: state.failures + 1,
+        processing: state.processing - 1,
       )
       |> actor.continue
     }
     Cancel(id) -> {
-      State(..state, active: state.active |> set.delete(id))
+      State(
+        ..state,
+        active: state.active |> set.delete(id),
+        processing: state.processing - 1,
+      )
       |> actor.continue
     }
     Die -> {
       wisp.log_error("Terminating maw early")
       actor.stop()
     }
+    GetStatus(reply) -> {
+      QueueStatus(
+        active: state.processing,
+        successes: state.successes,
+        failures: state.failures,
+      )
+      |> actor.send(reply, _)
+      actor.continue(state)
+    }
   }
 }
 
 fn start_mail_manager(ctx: APIContext) {
-  State(set.new(), ctx, 0, 0)
+  State(set.new(), ctx, 0, 0, 0)
   |> actor.new
   |> actor.on_message(handle_message)
   |> actor.start
