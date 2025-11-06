@@ -4,6 +4,7 @@ import gleam/result
 import gleam/string
 import glenvy/dotenv
 import glenvy/env
+import maw
 import rate_limiter
 import sqlight
 import wisp
@@ -37,6 +38,7 @@ pub type Context {
     database_connection: sqlight.Connection,
     ao3_label: String,
     rate_limiter: process.Name(rate_limiter.Message),
+    maw: process.Name(maw.Message),
   )
 }
 
@@ -78,23 +80,23 @@ pub fn load_context() -> Result(Context, ContextError) {
   use secret <- result.try(
     env.string("FUC_OAUTH_CLIENT_SECRET") |> result.map_error(EnvError),
   )
-  let client = OAuthClient(id, secret)
+  let oauth_client = OAuthClient(id, secret)
 
   use port <- result.try(env.int("FUC_PORT") |> result.map_error(EnvError))
 
   // We drop any trailing slashes from the address
-  use addr <- result.try(
+  use address <- result.try(
     env.string("FUC_ADDRESS") |> result.map_error(EnvError),
   )
-  let addr = case string.last(addr) {
-    Ok("/") -> Ok(string.drop_end(addr, 1))
-    Ok(_) -> Ok(addr)
+  let address = case string.last(address) {
+    Ok("/") -> Ok(string.drop_end(address, 1))
+    Ok(_) -> Ok(address)
     Error(_) ->
       Error(Impossible(
         "Address is empty despite get_env_var validating it isn't",
       ))
   }
-  use addr <- result.try(addr)
+  use address <- result.try(address)
 
   // Create the database as soon as we know what it is called
   // If we're running under systemd we use the STATE_DIRECTORY environment variable
@@ -131,7 +133,17 @@ pub fn load_context() -> Result(Context, ContextError) {
     env.string("FUC_AO3_LABEL") |> result.map_error(EnvError),
   )
 
-  let rl_name = process.new_name("rate_limiter")
+  let rate_limiter = process.new_name("rate_limiter")
+  let maw = process.new_name("maw")
 
-  Context(client, addr, port, conn, ao3_label, rl_name) |> Ok
+  Context(
+    oauth_client:,
+    address:,
+    port:,
+    database_connection: conn,
+    ao3_label:,
+    rate_limiter:,
+    maw:,
+  )
+  |> Ok
 }

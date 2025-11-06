@@ -26,14 +26,19 @@ import gleam/time/timestamp.{type Timestamp}
 import parser.{type ArchiveUpdate}
 import rate_limiter
 import sqlight
-import state.{type Context}
 import wisp
 
 const api_path = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
 
-pub fn awaken_the_maw(ctx: Context, token: OAuthToken) -> Result(Nil, Nil) {
-  let api_ctx = make_api_context(ctx, token)
-  case start_mail_manager(api_ctx) {
+pub fn awaken_the_maw(
+  conn: sqlight.Connection,
+  ao3_label: String,
+  rate_limiter: process.Name(rate_limiter.Message),
+  maw: process.Name(Message),
+  token: OAuthToken,
+) -> Result(Nil, Nil) {
+  let api_ctx = APIContext(conn, ao3_label, rate_limiter, token)
+  case start_mail_manager(api_ctx, maw) {
     Ok(manager) -> {
       process.spawn(fn() { feed_maw(manager.data, api_ctx, None) })
       Nil |> Ok
@@ -49,7 +54,7 @@ pub type QueueStatus {
   QueueStatus(active: Int, successes: Int, failures: Int)
 }
 
-type Message {
+pub type Message {
   /// Queue an email for processing
   Queue(id: String, manager: Subject(Message))
   /// Mark an email as processed (success)
@@ -73,10 +78,6 @@ type APIContext {
     limiter: Name(rate_limiter.Message),
     token: OAuthToken,
   )
-}
-
-fn make_api_context(ctx: Context, token: OAuthToken) -> APIContext {
-  APIContext(ctx.database_connection, ctx.ao3_label, ctx.rate_limiter, token)
 }
 
 type State {
@@ -189,11 +190,20 @@ fn handle_message(state: State, msg: Message) -> actor.Next(State, Message) {
   }
 }
 
-fn start_mail_manager(ctx: APIContext) {
-  State(set.new(), ctx, 0, 0, 0)
-  |> actor.new
-  |> actor.on_message(handle_message)
-  |> actor.start
+/// Start a new mail manager, or return the existing one
+fn start_mail_manager(
+  ctx: APIContext,
+  name: process.Name(Message),
+) -> Result(actor.Started(Subject(Message)), actor.StartError) {
+  case process.named(name) {
+    Ok(pid) -> process.named_subject(name) |> actor.Started(pid, data: _) |> Ok
+    Error(Nil) ->
+      State(set.new(), ctx, 0, 0, 0)
+      |> actor.new
+      |> actor.named(name)
+      |> actor.on_message(handle_message)
+      |> actor.start
+  }
 }
 
 /// Spawns an email worker and traps exits

@@ -162,6 +162,23 @@ fn generate_work_list(ctx: Context) -> StringTree {
 fn home_page(req: Request, ctx: Context) -> Response {
   use <- wisp.require_method(req, http.Get)
 
+  let status = case process.named(ctx.maw) {
+    Ok(_) -> {
+      let call =
+        process.call(ctx.maw |> process.named_subject, 30, maw.GetStatus)
+      string_tree.from_strings([
+        "<p>Status: ",
+        int.to_string(call.active),
+        " in progress, ",
+        int.to_string(call.successes),
+        " completed, ",
+        int.to_string(call.failures),
+        " failures</p>",
+      ])
+    }
+    Error(Nil) -> string_tree.new()
+  }
+
   let body =
     string_tree.from_string(
       "<p>Hello World</p>
@@ -169,6 +186,7 @@ fn home_page(req: Request, ctx: Context) -> Response {
         <button type='submit'>Sync</button>
       </form>",
     )
+    |> string_tree.append_tree(status)
     |> string_tree.append_tree(generate_work_list(ctx))
 
   wisp.ok()
@@ -419,7 +437,15 @@ fn with_access_token(ctx: Context, next: fn(OAuthToken) -> Response) -> Response
 fn sync_inbox(req: Request, ctx: Context) -> Response {
   use <- wisp.require_method(req, http.Post)
   use token <- with_access_token(ctx)
-  case maw.awaken_the_maw(ctx, token) {
+  case
+    maw.awaken_the_maw(
+      ctx.database_connection,
+      ctx.ao3_label,
+      ctx.rate_limiter,
+      ctx.maw,
+      token,
+    )
+  {
     Ok(Nil) -> wisp.redirect("/")
     Error(Nil) -> wisp.internal_server_error()
   }
