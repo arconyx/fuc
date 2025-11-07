@@ -265,7 +265,7 @@ fn to_update(builder: UpdateBuilder) -> Result(ArchiveUpdate, Error) {
     WorkUpdateBuilder(
       Some(work_id),
       Some(work_title),
-      None,
+      _,
       None,
       None,
       None,
@@ -304,7 +304,7 @@ fn to_update(builder: UpdateBuilder) -> Result(ArchiveUpdate, Error) {
     ChapterUpdateBuilder(
       Some(work_id),
       Some(work_title),
-      None,
+      _,
       None,
       None,
       None,
@@ -456,33 +456,66 @@ pub fn parse_updates_from_email(
   |> list.try_map(parse_update)
 }
 
+/// Strip "enclosing quotes" from a string
+/// Returns the string unchanged if it doesn't start and end with
+/// double quotes.
+fn strip_quotes(input: String) {
+  case string.starts_with(input, "\"") && string.ends_with(input, "\"") {
+    False -> input
+    True -> string.drop_start(input, 1) |> string.drop_end(1)
+  }
+}
+
 fn parse_update(blob: String) -> Result(ArchiveUpdate, Error) {
   use lines <- result.try(blob |> string.trim |> split_lines)
 
   case lines {
-    [title_line, ..rest] -> {
-      case string.crop(title_line, "posted a") {
-        "posted a new work:" | "posted a backdated work:" ->
-          parse_update_work(rest)
-        "posted a new chapter of " <> title_and_len -> {
-          case regexp.from_string(" \\(\\d+ words\\):\\Z") {
+    [title_line, ..rest] ->
+      case string.split_once(title_line, on: "posted a") {
+        Ok(#(author_section, title_section)) ->
+          case
+            regexp.from_string(
+              "\\Q (http\\Es?\\Q://archiveofourown.org/users/\\E\\S+\\)",
+            )
+          {
             Ok(re) -> {
-              let title = regexp.replace(re, title_and_len, "")
-              parse_update_chapter(rest, title)
+              let authors =
+                regexp.replace(re, author_section, "")
+                |> string.trim
+                |> strip_quotes
+                |> Some
+              case string.trim(title_section) {
+                "new work:" | "backdated work:" ->
+                  parse_update_work(rest, authors)
+                "new chapter of " <> title_and_len -> {
+                  case regexp.from_string(" \\(\\d+ words\\):\\Z") {
+                    Ok(re) -> {
+                      regexp.replace(re, title_and_len, "")
+                      |> string.trim
+                      |> strip_quotes
+                      |> parse_update_chapter(rest, _, authors)
+                    }
+                    Error(_) ->
+                      Error(ParseError("Unable to construct word count regex"))
+                  }
+                }
+                line ->
+                  Error(ParseError(
+                    "Unable to parse title from: "
+                    <> line
+                    <> "\nIn email:\n"
+                    <> string.join(lines, with: "\n"),
+                  ))
+              }
             }
-            Error(_) ->
-              Error(ParseError("Unable to construct word count regex"))
+            Error(_) -> ParseError("Unable to construct author regex") |> Error
           }
-        }
-        line ->
-          Error(ParseError(
-            "Unable to parse title from: "
-            <> line
-            <> "\nIn email:\n"
-            <> string.join(lines, with: "\n"),
-          ))
+        Error(Nil) ->
+          ParseError(
+            "Unable to parse title and author(s) from line:\n" <> title_line,
+          )
+          |> Error
       }
-    }
     [] -> Error(ParseError("Empty list when seeking title"))
   }
 }
@@ -491,29 +524,38 @@ fn parse_update(blob: String) -> Result(ArchiveUpdate, Error) {
 fn parse_update_chapter(
   lines: List(String),
   work_title: String,
+  authors: Option(String),
 ) -> Result(ArchiveUpdate, Error) {
   let builder = {
     let builder = new_chapter_update() |> set_work_title(work_title)
+    use builder <- result.try(builder)
+    let builder = case authors {
+      Some(authors) -> set_authors(builder, authors)
+      None -> builder |> Ok
+    }
     use builder <- result.try(builder)
     use builder, lines <- extract_chapter_url(builder, lines)
     use builder, lines <- extract_chapter_title(builder, lines)
     use builder, lines <- extract_authors(builder, lines)
     use builder, lines <- extract_chapter_summary(builder, lines)
-    use builder, lines <- extract_details(builder, lines)
-    extract_work_summary(builder, lines)
+    extract_details(builder, lines)
   }
   use builder <- result.try(builder)
   builder |> to_update
 }
 
-fn parse_update_work(lines: List(String)) {
+fn parse_update_work(lines: List(String), authors: Option(String)) {
   let builder = {
     let builder = new_work_update()
+    let builder = case authors {
+      Some(authors) -> set_authors(builder, authors)
+      None -> builder |> Ok
+    }
+    use builder <- result.try(builder)
     use builder, lines <- extract_work_url(builder, lines)
     use builder, lines <- extract_work_title(builder, lines)
     use builder, lines <- extract_authors(builder, lines)
-    use builder, lines <- extract_details(builder, lines)
-    extract_work_summary(builder, lines)
+    extract_details(builder, lines)
   }
   use builder <- result.try(builder)
   builder |> to_update
@@ -625,16 +667,17 @@ fn extract_chapter_title(
   case lines {
     ["", ..] -> ParseError("Couldn't find title") |> Error
     [chapter_title, ..rest] ->
-      set_chapter_title(builder, chapter_title)
+      strip_quotes(chapter_title)
+      |> set_chapter_title(builder, _)
       |> result.try(fn(b) { next(b, rest) })
     _ -> ParseError("Invalid list when seeking title") |> Error
   }
 }
 
-/// Extracts chapter title
+/// Extracts work title
 /// 
-/// The first line is expected to contain the chapter title
-/// e.g `Chapter 2: Some Title (123 words)`
+/// The first line is expected to contain the work title
+/// e.g `Some Title (123 words)`
 /// 
 /// The only validation is asserting that it is non-empty.
 /// We do not strip the word count from the title since it seems useful.
@@ -652,7 +695,8 @@ fn extract_work_title(
   case lines {
     ["", ..] -> ParseError("Couldn't find title") |> Error
     [title, ..rest] ->
-      set_work_title(builder, title)
+      strip_quotes(title)
+      |> set_work_title(builder, _)
       |> result.try(fn(b) { next(b, rest) })
     _ -> ParseError("Invalid list when seeking title") |> Error
   }
@@ -761,6 +805,17 @@ fn trawl_for_chapter_summary(lines: List(String), index: Int) -> Int {
   }
 }
 
+fn search_for_series_or_summary(lines: List(String), builder: UpdateBuilder) {
+  case lines {
+    ["Series: " <> series, ..rest] ->
+      set_series(builder, series)
+      |> result.try(search_for_series_or_summary(rest, _))
+    ["Summary:" <> _, ..] -> extract_work_summary(builder, lines)
+    [_, ..rest] -> search_for_series_or_summary(rest, builder)
+    [] -> builder |> Ok
+  }
+}
+
 /// Extract detailed work information from lines
 ///
 /// This block is optional. If present the first line starts with `"Chapters: "`
@@ -772,7 +827,6 @@ fn trawl_for_chapter_summary(lines: List(String), index: Int) -> Int {
 fn extract_details(
   builder: UpdateBuilder,
   lines: List(String),
-  next: fn(UpdateBuilder, List(String)) -> Result(UpdateBuilder, Error),
 ) -> Result(UpdateBuilder, Error) {
   let lines = drop_empty_leading_lines(lines)
   case lines {
@@ -799,35 +853,7 @@ fn extract_details(
       ] -> {
       let builder = set_details(builder, chapters, fandom, rating, warnings)
       use builder <- result.try(builder)
-      case rest {
-        ["Series: " <> series, ..rest]
-        | [_, "Series: " <> series, ..rest]
-        | [_, _, "Series: " <> series, ..rest]
-        | [_, _, _, "Series: " <> series, ..rest] ->
-          builder
-          |> set_series(series)
-          |> result.try(fn(b) {
-            // Strip leading empty line, if present
-            let rest = case rest {
-              ["", ..rest] -> rest
-              _ -> rest
-            }
-            next(b, rest)
-          })
-        // Strip off optional tag lines if we don't have a series but do have a summary
-        ["Summary:", ..rest]
-        | [_, "Summary:", ..rest]
-        | [_, _, "Summary:", ..rest]
-        | [_, _, _, "Summary:", ..rest]
-        | [_, _, _, _, "Summary:", ..rest]
-        | [_, _, _, _, _, "Summary:", ..rest]
-        | [_, _, _, _, _, _, "Summary:", ..rest] ->
-          next(builder, ["Summary:", ..rest])
-        // If we don't have an empty line in the first for then we can't havea
-        // a summary, so we can just terminate.
-        [_, ..] -> builder |> Ok
-        [] -> builder |> Ok
-      }
+      search_for_series_or_summary(rest, builder)
     }
     // If we have an empty list then we're probably at the end of an update with
     // a sparse work
@@ -854,7 +880,7 @@ fn extract_work_summary(
 ) -> Result(UpdateBuilder, Error) {
   case drop_empty_leading_lines(lines) {
     // The actual summary always starts on the line after the header, with 4 space indention
-    ["Summary:", ..summary] -> {
+    ["Summary:" <> _, ..summary] -> {
       string.join(summary, "\n")
       |> string.trim
       |> set_work_summary(builder, _)

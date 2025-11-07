@@ -77,7 +77,7 @@ pub fn parse_updates_from_email_single_chapter_three_test() {
         Some("The fic summary goes here"),
       ),
       0,
-      "Chapter 3: Hi There (4072 words)",
+      "\"Chapter 6: Pineapples\" (3810 words)",
       None,
     )
 
