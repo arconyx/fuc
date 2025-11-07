@@ -854,8 +854,8 @@ fn extract_work_summary(
 ) -> Result(UpdateBuilder, Error) {
   case drop_empty_leading_lines(lines) {
     // The actual summary always starts on the line after the header, with 4 space indention
-    ["Summary:", "    " <> summary, ..more_summary] -> {
-      string.join([summary, ..more_summary], "\n")
+    ["Summary:", ..summary] -> {
+      string.join(summary, "\n")
       |> string.trim
       |> set_work_summary(builder, _)
     }
