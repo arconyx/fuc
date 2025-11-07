@@ -33,6 +33,35 @@ pub fn parse_updates_from_email_single_chapter_test() {
   assert expected == update
 }
 
+// Testing changed email format
+pub fn parse_updates_from_email_single_chapter_two_test() {
+  let expected =
+    parser.NewChapter(
+      parser.DetailedWork(
+        78_914_101,
+        "Some Nameless Work (Break things)(",
+        "ArcOnyx and FakeUser",
+        "3/?",
+        "Glee - Unit Testing",
+        "General",
+        "Choose Not To Use Archive Warnings",
+        None,
+        Some("A summary of the fic."),
+      ),
+      1_414_155,
+      "Chapter 3: Hi There (4072 words)",
+      None,
+    )
+
+  let assert Ok(body) =
+    simplifile.read(data_path <> "email_body_single_chapter_two.txt")
+
+  let assert Ok(updates) = parser.parse_updates_from_email(body)
+
+  let assert [update] = updates
+  assert expected == update
+}
+
 pub fn parse_updates_from_email_single_chapter_with_chap_summary_test() {
   let expected =
     parser.NewChapter(

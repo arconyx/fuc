@@ -779,9 +779,23 @@ fn extract_details(
       "Chapters: " <> chapters,
       "Fandom: " <> fandom,
       "Rating: " <> rating,
-      "Warning: " <> warnings,
+      "Warnings: " <> warnings,
       ..rest
-    ] -> {
+    ]
+    | [
+        "Chapters: " <> chapters,
+        "Fandom: " <> fandom,
+        "Rating: " <> rating,
+        "Warning: " <> warnings,
+        ..rest
+      ]
+    | [
+        "Chapters: " <> chapters,
+        "Fandoms: " <> fandom,
+        "Rating: " <> rating,
+        "Warning: " <> warnings,
+        ..rest
+      ] -> {
       let builder = set_details(builder, chapters, fandom, rating, warnings)
       use builder <- result.try(builder)
       case rest {
@@ -800,11 +814,13 @@ fn extract_details(
             next(b, rest)
           })
         // Strip off optional tag lines if we don't have a series but do have a summary
-        [_, "", "Summary:", ..rest]
-        | [_, _, "", "Summary:", ..rest]
-        | [_, _, _, "", "Summary:", ..rest]
-        | [_, _, _, _, "", "Summary:", ..rest]
-        | [_, _, _, _, _, "", "Summary:", ..rest] ->
+        ["Summary:", ..rest]
+        | [_, "Summary:", ..rest]
+        | [_, _, "Summary:", ..rest]
+        | [_, _, _, "Summary:", ..rest]
+        | [_, _, _, _, "Summary:", ..rest]
+        | [_, _, _, _, _, "Summary:", ..rest]
+        | [_, _, _, _, _, _, "Summary:", ..rest] ->
           next(builder, ["Summary:", ..rest])
         // If we don't have an empty line in the first for then we can't havea
         // a summary, so we can just terminate.
