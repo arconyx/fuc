@@ -62,6 +62,34 @@ pub fn parse_updates_from_email_single_chapter_two_test() {
   assert expected == update
 }
 
+pub fn parse_updates_from_email_single_chapter_three_test() {
+  let expected =
+    parser.NewChapter(
+      parser.DetailedWork(
+        0,
+        "Fic Title",
+        "ArcOnyx",
+        "6/?",
+        "Space: Isn't Real, Other Fandom",
+        "General",
+        "No Archive Warnings Apply",
+        None,
+        Some("The fic summary goes here"),
+      ),
+      0,
+      "Chapter 3: Hi There (4072 words)",
+      None,
+    )
+
+  let assert Ok(body) =
+    simplifile.read(data_path <> "email_body_single_chapter_three.txt")
+
+  let assert Ok(updates) = parser.parse_updates_from_email(body)
+
+  let assert [update] = updates
+  assert expected == update
+}
+
 pub fn parse_updates_from_email_single_chapter_with_chap_summary_test() {
   let expected =
     parser.NewChapter(
