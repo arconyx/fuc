@@ -348,7 +348,8 @@ fn to_update(builder: UpdateBuilder) -> Result(ArchiveUpdate, Error) {
       )
       |> NewChapter(chapter_id, chapter_title, chapter_summary)
       |> Ok
-    _ -> ParseError("Invalid builder state") |> Error
+    _ ->
+      ParseError("Invalid builder state:\n" <> string.inspect(builder)) |> Error
   }
 }
 
