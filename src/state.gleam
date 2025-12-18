@@ -53,18 +53,19 @@ pub type OAuthClient {
 pub fn load_context() -> Result(Context, ContextError) {
   // First load environment variables from systemd credentials, if present
   case env.string("CREDENTIALS_DIRECTORY") {
-    Ok(dir) ->
-      case dotenv.load_from(dir <> "/fuc.env") {
-        Ok(_) ->
-          wisp.log_info(
-            "Loaded credentials file from ${CREDENTIALS_DIRECTORY}/fuc.env",
-          )
+    Ok(dir) -> {
+      let file = dir <> "/fuc.env"
+      case dotenv.load_from(file) {
+        Ok(_) -> wisp.log_info("Loaded credentials file from " <> file)
         Error(e) ->
           wisp.log_error(
-            "Unable to read credentials file from ${CREDENTIALS_DIRECTORY}/fuc.env: \n"
+            "Unable to read credentials file from "
+            <> file
+            <> ": \n"
             <> string.inspect(e),
           )
       }
+    }
     Error(env.NotFound(n)) ->
       wisp.log_info(
         "$" <> n <> " not found,falling back to environment variables",
