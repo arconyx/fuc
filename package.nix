@@ -2,7 +2,6 @@
   stdenv,
   lib,
   gleam,
-  erlang,
   beamMinimalPackages,
   makeWrapper,
 }:
@@ -39,7 +38,7 @@ stdenv.mkDerivation {
 
   nativeBuildInputs = [
     gleam
-    erlang
+    beamMinimalPackages.erlang
     makeWrapper
     (rebar3WithPlugins {
       plugins = with beamMinimalPackages; [ pc ];
@@ -93,7 +92,7 @@ stdenv.mkDerivation {
     ls $out/gleam/${project.name}
     makeWrapper $out/gleam/${project.name}/entrypoint.sh $out/bin/${project.name} \
     --add-flags run \
-    --prefix PATH : ${erlang}/bin
+    --prefix PATH : ${beamMinimalPackages.erlang}/bin
 
     runHook postInstall
   '';

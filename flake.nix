@@ -13,8 +13,8 @@
         default = pkgs.mkShell {
           packages = with pkgs; [
             gleam
-            erlang_27
-            beam27Packages.rebar3
+            beamPackages.erlang
+            beamPackages.rebar3
             litecli
           ];
         };
