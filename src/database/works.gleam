@@ -16,11 +16,11 @@ pub const table_work = "works"
 
 /// AO3 emails only include full details for a work once per email
 /// We only allow inserting these detailed emails into the database
-// This should be fine so long as we do all work insertions for an update
-// before any update insertions (as every email includes detailed information
-// for all its works)
-// We use this type instead of the Work type in parser.gleam to make passing
-// a SparseWork impossible
+/// This should be fine so long as we do all work insertions for an update
+/// before any update insertions (as every email includes detailed information
+/// for all its works)
+/// We use this type instead of the Work type in parser.gleam to make passing
+/// a SparseWork impossible
 pub type Work {
   Work(
     id: Int,
