@@ -26,6 +26,8 @@ let
     [packages]
     ${lib.concatLines (builtins.map (p: ''${p.name} = "${p.version}"'') manifest.packages)}
   '';
+
+  erlang = beamMinimalPackages.erlang;
 in
 stdenv.mkDerivation {
   pname = project.name;
@@ -38,11 +40,17 @@ stdenv.mkDerivation {
 
   nativeBuildInputs = [
     gleam
-    beamMinimalPackages.erlang
+    erlang
     makeWrapper
     (rebar3WithPlugins {
       plugins = with beamMinimalPackages; [ pc ];
     })
+  ];
+
+  # We don't strictly need this here but it is semantically correct
+  # to include it
+  buildInputs = [
+    erlang
   ];
 
   configurePhase = ''
