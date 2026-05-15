@@ -75,14 +75,14 @@ stdenv.mkDerivation {
     runHook postBuild
   '';
 
-  # This recompiles the entire thing to run the tests, making it useless
-  # We want to test the shipment, somehow
-  # doCheck = true;
-  # checkPhase = ''
-  #   runHook preCheck
-  #   gleam test
-  #   runHook postCheck
-  # '';
+  # This recompiles the entire thing to run the tests, making it *slow*
+  # Still, some tests beats no tests
+  doCheck = true;
+  checkPhase = ''
+    runHook preCheck
+    gleam test
+    runHook postCheck
+  '';
 
   installPhase = ''
     runHook preInstall
