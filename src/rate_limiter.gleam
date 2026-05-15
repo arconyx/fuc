@@ -2,7 +2,7 @@
 ////
 //// Google rate limits us to 15000 quota units / user / second
 //// Where getting the message list is 5 units and getting
-//// and individual message is 5 units.
+//// an individual message is 5 units.
 ////
 //// As we make requests we add their quota units to `intensity`
 //// then reduce intensity by 15000 * minutes since last request
@@ -90,7 +90,11 @@ pub fn start_rate_limiter(
 }
 
 /// Call a function, respecting the rate limiter
-pub fn rate_limited(limiter: Name(Message), cost: Int, next: fn() -> res) -> res {
+pub fn rate_limited(
+  limiter: Name(Message),
+  cost: Int,
+  next: fn() -> res,
+) -> res {
   let sleep = process.call(process.named_subject(limiter), 10, Poll(_, cost))
   case sleep {
     option.Some(delay) -> process.sleep(delay)
