@@ -89,7 +89,6 @@ stdenv.mkDerivation {
 
     mkdir -p $out/{bin,gleam}
     cp -r build/erlang-shipment $out/gleam/${project.name}
-    ls $out/gleam/${project.name}
     makeWrapper $out/gleam/${project.name}/entrypoint.sh $out/bin/${project.name} \
     --add-flags run \
     --prefix PATH : ${beamMinimalPackages.erlang}/bin
