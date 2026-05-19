@@ -20,6 +20,7 @@ import gleam/time/duration
 import gleam/time/timestamp
 import gleam/uri
 import glenvy/env
+import logging
 import maw
 import mist
 import rate_limiter
@@ -33,7 +34,8 @@ import wisp/wisp_mist
 /// Entry point
 /// Starts server
 pub fn main() {
-  wisp.configure_logger()
+  logging.configure()
+  logging.set_level(logging.Info)
 
   let ctx = state.load_context()
   // There is no need for the secret key to be in the context
@@ -414,7 +416,10 @@ fn google_auth_callback(req: Request, ctx: Context) -> Response {
 }
 
 /// Middleware to grab access token before making requests
-fn with_access_token(ctx: Context, next: fn(OAuthToken) -> Response) -> Response {
+fn with_access_token(
+  ctx: Context,
+  next: fn(OAuthToken) -> Response,
+) -> Response {
   case tokens.get_access_token(ctx.database_connection) {
     Some(token) -> next(token)
     None -> wisp.redirect(ctx.address <> "/auth/google")
