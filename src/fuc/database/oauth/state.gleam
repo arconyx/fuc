@@ -8,7 +8,7 @@ import cake/delete
 import cake/insert
 import cake/select
 import cake/where
-import database/internal.{type Error}
+import fuc/database/internal.{type Error}
 import gleam/dynamic/decode
 import gleam/float
 import gleam/list
@@ -35,7 +35,9 @@ fn oauth_state_from_sql() -> decode.Decoder(OAuthStateToken) {
 }
 
 /// Create the table used to store state tokens
-pub fn create_table(conn: sqlight.Connection) -> Result(sqlight.Connection, Nil) {
+pub fn create_table(
+  conn: sqlight.Connection,
+) -> Result(sqlight.Connection, Nil) {
   internal.create_table(
     conn,
     table_oauth_state,

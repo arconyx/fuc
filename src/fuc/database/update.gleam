@@ -3,8 +3,8 @@ import cake/delete
 import cake/insert.{type InsertRow, type InsertValue}
 import cake/select
 import cake/where
-import database/internal
-import database/works
+import fuc/database/internal
+import fuc/database/works
 import gleam/dynamic/decode
 import gleam/float
 import gleam/int

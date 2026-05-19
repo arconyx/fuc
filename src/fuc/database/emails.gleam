@@ -2,7 +2,7 @@ import cake/adapter/sqlite
 import cake/insert
 import cake/select
 import cake/where
-import database/internal
+import fuc/database/internal
 import gleam/dynamic/decode
 import gleam/list
 import gleam/option.{type Option, None}
@@ -17,7 +17,9 @@ pub type Email {
   Email(id: String, success: Bool)
 }
 
-pub fn create_table(conn: sqlight.Connection) -> Result(sqlight.Connection, Nil) {
+pub fn create_table(
+  conn: sqlight.Connection,
+) -> Result(sqlight.Connection, Nil) {
   internal.create_table(
     conn,
     table_email,

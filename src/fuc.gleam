@@ -1,9 +1,12 @@
-import database/oauth/state as oauth_state
-import database/oauth/tokens.{type OAuthToken}
-import database/unified.{type WorkWithUpdateCount}
-import database/update.{type UpdateRow}
-import database/works.{type Work}
 import envoy
+import fuc/database/oauth/state as oauth_state
+import fuc/database/oauth/tokens.{type OAuthToken}
+import fuc/database/unified.{type WorkWithUpdateCount}
+import fuc/database/update.{type UpdateRow}
+import fuc/database/works.{type Work}
+import fuc/maw
+import fuc/rate_limiter
+import fuc/state.{type Context}
 import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/hackney
@@ -21,11 +24,8 @@ import gleam/time/duration
 import gleam/time/timestamp
 import gleam/uri
 import logging
-import maw
 import mist
-import rate_limiter
 import sqlight
-import state.{type Context}
 import wisp.{type Request, type Response}
 import wisp/wisp_mist
 

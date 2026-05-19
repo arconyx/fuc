@@ -3,7 +3,7 @@ import cake/insert.{type InsertRow, type InsertValue}
 import cake/select
 import cake/update
 import cake/where
-import database/internal
+import fuc/database/internal
 import gleam/dynamic/decode
 import gleam/list
 import gleam/option.{type Option, None, Some}

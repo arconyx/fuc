@@ -1,5 +1,7 @@
-import database/database
 import envoy
+import fuc/database/database
+import fuc/maw
+import fuc/rate_limiter
 import gleam/bit_array
 import gleam/bool
 import gleam/erlang/process
@@ -7,8 +9,6 @@ import gleam/int
 import gleam/list
 import gleam/result
 import gleam/string
-import maw
-import rate_limiter
 import sqlight
 import wisp
 

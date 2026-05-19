@@ -1,4 +1,5 @@
-import database/oauth/tokens.{type OAuthToken}
+import fuc/database/oauth/tokens.{type OAuthToken}
+import fuc/rate_limiter
 import gleam/bool
 import gleam/erlang/process.{type Name, type Subject}
 import gleam/float
@@ -11,7 +12,6 @@ import gleam/result
 import gleam/string
 import gleam/uri
 import logging.{Error as LogError, Warning, log}
-import rate_limiter
 
 const base_path: String = "/gmail/v1/users/me/messages"
 

@@ -3,10 +3,13 @@
 //// This module defines an actor that directs the fetching
 //// and parsing of individual emails.
 
-import database/emails
-import database/oauth/tokens.{type OAuthToken}
-import database/update
-import database/works
+import fuc/database/emails
+import fuc/database/oauth/tokens.{type OAuthToken}
+import fuc/database/update
+import fuc/database/works
+import fuc/gmail
+import fuc/parser.{type ArchiveUpdate}
+import fuc/rate_limiter
 import gleam/bool
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Name, type Subject}
@@ -20,9 +23,6 @@ import gleam/result
 import gleam/set.{type Set}
 import gleam/string
 import gleam/time/timestamp.{type Timestamp}
-import gmail
-import parser.{type ArchiveUpdate}
-import rate_limiter
 import sqlight
 import wisp
 

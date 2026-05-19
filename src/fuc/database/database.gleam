@@ -1,8 +1,8 @@
-import database/emails
-import database/oauth/state
-import database/oauth/tokens
-import database/update
-import database/works
+import fuc/database/emails
+import fuc/database/oauth/state
+import fuc/database/oauth/tokens
+import fuc/database/update
+import fuc/database/works
 import gleam/dynamic/decode
 import gleam/result
 import gleam/string

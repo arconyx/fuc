@@ -1,7 +1,7 @@
 import cake/adapter/sqlite
 import cake/insert
 import cake/select
-import database/internal
+import fuc/database/internal
 import gleam/dynamic/decode
 import gleam/list
 import gleam/option.{type Option, None}
@@ -28,7 +28,9 @@ fn oauth_token_from_sql() -> decode.Decoder(OAuthToken) {
 }
 
 /// Create table for storing oauth access tokens
-pub fn create_table(conn: sqlight.Connection) -> Result(sqlight.Connection, Nil) {
+pub fn create_table(
+  conn: sqlight.Connection,
+) -> Result(sqlight.Connection, Nil) {
   internal.create_table(
     conn,
     table_oauth_tokens,

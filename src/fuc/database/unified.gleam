@@ -2,8 +2,8 @@ import cake/adapter/sqlite
 import cake/join
 import cake/select
 import cake/where
-import database/update
-import database/works
+import fuc/database/update
+import fuc/database/works
 import gleam/dynamic/decode.{type Decoder}
 import gleam/list
 import sqlight.{type Connection, type Error}

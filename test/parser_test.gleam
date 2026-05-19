@@ -1,5 +1,5 @@
+import fuc/parser
 import gleam/option.{None, Some}
-import parser
 import simplifile
 
 const data_path = "./test/data/"
