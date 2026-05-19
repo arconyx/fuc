@@ -191,6 +191,7 @@ fn home_page(req: Request, ctx: Context) -> Response {
     ])
     |> string_tree.append_tree(status)
     |> string_tree.append_tree(generate_work_list(ctx))
+    |> string_tree.to_string()
 
   wisp.ok()
   |> wisp.html_body(body)
@@ -299,7 +300,7 @@ fn validate_state(
     Ok(_) -> next()
     Error(e) -> {
       wisp.log_warning("State validation failed: " <> e)
-      wisp.bad_request()
+      wisp.bad_request("State validation failed")
     }
   }
 }
@@ -542,6 +543,7 @@ fn work_page(req: Request, ctx: Context, id: String) -> Response {
                     ..list.map(updates, update_to_html)
                   ]),
                 )
+                |> string_tree.to_string()
 
               wisp.ok()
               |> wisp.html_body(html)
