@@ -1,9 +1,12 @@
 import database/database
+import envoy
+import gleam/bit_array
+import gleam/bool
 import gleam/erlang/process
+import gleam/int
+import gleam/list
 import gleam/result
 import gleam/string
-import glenvy/dotenv
-import glenvy/env
 import maw
 import rate_limiter
 import sqlight
@@ -13,12 +16,13 @@ import wisp
 
 /// Errors reported during context parsing and other parts of startup
 pub type ContextError {
-  MissingVariable(key: String)
-  ParsingError(value: String)
+  MissingVariable
+  ParsingError
   Impossible(wtf: String)
   DatabaseError
   SqlightError(err: sqlight.Error)
-  EnvError(env.Error)
+  UnableToSetEnv
+  UnableToReadEnvFile
 }
 
 /// Context for server invocation
@@ -52,10 +56,10 @@ pub type OAuthClient {
 /// a context with an invalid database referenced.
 pub fn load_context() -> Result(Context, ContextError) {
   // First load environment variables from systemd credentials, if present
-  case env.string("CREDENTIALS_DIRECTORY") {
+  case envoy.get("CREDENTIALS_DIRECTORY") {
     Ok(dir) -> {
       let file = dir <> "/fuc.env"
-      case dotenv.load_from(file) {
+      case load_env(file) {
         Ok(_) -> wisp.log_info("Loaded credentials file from " <> file)
         Error(e) ->
           wisp.log_error(
@@ -66,28 +70,32 @@ pub fn load_context() -> Result(Context, ContextError) {
           )
       }
     }
-    Error(env.NotFound(n)) ->
+    Error(Nil) ->
       wisp.log_info(
-        "$" <> n <> " not found,falling back to environment variables",
+        "$CREDENTIALS_DIRECTORY not found, falling back to environment variables",
       )
-    Error(env.FailedToParse(n)) -> wisp.log_error("Unable to parse $" <> n)
   }
 
   // OAuth information gets a special type
   // This is probably overkill tbh
   use id <- result.try(
-    env.string("FUC_OAUTH_CLIENT_ID") |> result.map_error(EnvError),
+    envoy.get("FUC_OAUTH_CLIENT_ID") |> result.replace_error(MissingVariable),
   )
   use secret <- result.try(
-    env.string("FUC_OAUTH_CLIENT_SECRET") |> result.map_error(EnvError),
+    envoy.get("FUC_OAUTH_CLIENT_SECRET")
+    |> result.replace_error(MissingVariable),
   )
   let oauth_client = OAuthClient(id, secret)
 
-  use port <- result.try(env.int("FUC_PORT") |> result.map_error(EnvError))
+  use port <- result.try(
+    envoy.get("FUC_PORT")
+    |> result.try(int.parse)
+    |> result.replace_error(MissingVariable),
+  )
 
   // We drop any trailing slashes from the address
   use address <- result.try(
-    env.string("FUC_ADDRESS") |> result.map_error(EnvError),
+    envoy.get("FUC_ADDRESS") |> result.replace_error(MissingVariable),
   )
   let address = case string.last(address) {
     Ok("/") -> Ok(string.drop_end(address, 1))
@@ -102,7 +110,7 @@ pub fn load_context() -> Result(Context, ContextError) {
   // Create the database as soon as we know what it is called
   // If we're running under systemd we use the STATE_DIRECTORY environment variable
   let database_path = {
-    case env.string("STATE_DIRECTORY") {
+    case envoy.get("STATE_DIRECTORY") {
       Ok(state_dir) -> {
         let first_dir = case string.split_once(state_dir, on: ":") {
           Ok(#(first, _)) -> first
@@ -113,9 +121,8 @@ pub fn load_context() -> Result(Context, ContextError) {
         )
         Ok("file:" <> first_dir <> "/fuc.sqlite")
       }
-      Error(env.NotFound(_)) ->
-        env.string("FUC_DATABASE_PATH") |> result.map_error(EnvError)
-      Error(e) -> Error(EnvError(e))
+      Error(Nil) ->
+        envoy.get("FUC_DATABASE_PATH") |> result.replace_error(MissingVariable)
     }
   }
   use database_path <- result.try(database_path)
@@ -131,7 +138,7 @@ pub fn load_context() -> Result(Context, ContextError) {
   use conn <- result.try(conn)
 
   use ao3_label <- result.try(
-    env.string("FUC_AO3_LABEL") |> result.map_error(EnvError),
+    envoy.get("FUC_AO3_LABEL") |> result.replace_error(MissingVariable),
   )
 
   let rate_limiter = process.new_name("rate_limiter")
@@ -148,3 +155,36 @@ pub fn load_context() -> Result(Context, ContextError) {
   )
   |> Ok
 }
+
+fn load_env(from: String) {
+  case read_file_bits(from) {
+    Ok(binary) ->
+      case bit_array.to_string(binary) {
+        Ok(envstr) ->
+          envstr
+          |> string.split("\n")
+          |> list.map(string.trim)
+          |> list.filter(fn(line) { line != "" })
+          |> list.filter(fn(line) { bool.negate(string.starts_with(line, "#")) })
+          |> list.try_map(fn(line) {
+            case string.split_once(line, "=") {
+              Ok(#(key, value)) -> {
+                let key = string.trim(key)
+                let value = string.trim(value)
+                case string.is_empty(key) {
+                  True -> Nil |> Error
+                  // Will this have issues with "quoted values"?
+                  False -> envoy.set(key, value) |> Ok
+                }
+              }
+              Error(Nil) -> Nil |> Error
+            }
+          })
+        Error(_) -> Error(Nil)
+      }
+    Error(_) -> Error(Nil)
+  }
+}
+
+@external(erlang, "fuc_ffi", "read_file")
+fn read_file_bits(filepath: String) -> Result(BitArray, Nil)

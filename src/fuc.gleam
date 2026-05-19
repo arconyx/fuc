@@ -3,6 +3,7 @@ import database/oauth/tokens.{type OAuthToken}
 import database/unified.{type WorkWithUpdateCount}
 import database/update.{type UpdateRow}
 import database/works.{type Work}
+import envoy
 import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/hackney
@@ -19,7 +20,6 @@ import gleam/string_tree.{type StringTree}
 import gleam/time/duration
 import gleam/time/timestamp
 import gleam/uri
-import glenvy/env
 import logging
 import maw
 import mist
@@ -40,7 +40,7 @@ pub fn main() {
   let ctx = state.load_context()
   // There is no need for the secret key to be in the context
   let secret_key_base =
-    env.string("FUC_SECRET_KEY") |> result.map_error(state.EnvError)
+    envoy.get("FUC_SECRET_KEY") |> result.replace_error(state.MissingVariable)
 
   case ctx, secret_key_base {
     Ok(ctx), Ok(secret_key_base) -> {
