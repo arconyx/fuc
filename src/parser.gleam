@@ -1,6 +1,5 @@
 import gleam/bit_array
 import gleam/dynamic/decode
-import gleam/http/response.{type Response}
 import gleam/int
 import gleam/json
 import gleam/list
@@ -384,7 +383,7 @@ fn split_lines(s: String) -> Result(List(String), Error) {
 /// Returns a list of updates in the email and the time the email was recieved
 /// by the mailserver.
 pub fn parse_email(
-  email: Response(String),
+  email: String,
 ) -> Result(#(List(ArchiveUpdate), Timestamp), Error) {
   let part_decoder = {
     use mime <- decode.field("mimeType", decode.string)
@@ -423,7 +422,7 @@ pub fn parse_email(
   }
 
   let email =
-    json.parse(email.body, decoder)
+    json.parse(email, decoder)
     |> result.map_error(fn(e) { DecodeError(e) })
 
   case email {

@@ -106,20 +106,6 @@ pub fn start_rate_limiter(
   |> actor.start
 }
 
-/// Call a function, respecting the rate limiter
-pub fn rate_limited(
-  limiter: Name(Message),
-  cost: Int,
-  next: fn() -> res,
-) -> res {
-  let sleep = process.call(process.named_subject(limiter), 10, Poll(_, cost))
-  case sleep {
-    option.Some(delay) -> process.sleep(delay)
-    option.None -> Nil
-  }
-  next()
-}
-
 /// Calculate the amount of quota freed up over a time period.
 fn restore_quota(limiter: RateLimiter, at: Timestamp) -> RateLimiter {
   // TODO: Use monotonic clock

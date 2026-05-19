@@ -11,9 +11,6 @@ import gleam/bool
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Name, type Subject}
 import gleam/float
-import gleam/hackney
-import gleam/http
-import gleam/http/request
 import gleam/int
 import gleam/json
 import gleam/list
@@ -23,12 +20,11 @@ import gleam/result
 import gleam/set.{type Set}
 import gleam/string
 import gleam/time/timestamp.{type Timestamp}
+import gmail
 import parser.{type ArchiveUpdate}
 import rate_limiter
 import sqlight
 import wisp
-
-const api_path = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
 
 pub fn awaken_the_maw(
   conn: sqlight.Connection,
@@ -266,124 +262,61 @@ fn check_not_processed(
 }
 
 /// Processes a single email
-fn process_email(id: String, ctx: APIContext, manager: Subject(Message)) -> Nil {
+fn process_email(
+  id: String,
+  ctx: APIContext,
+  manager: Subject(Message),
+) -> Nil {
   use <- check_not_processed(id, ctx, fn() { process.send(manager, Cancel(id)) })
-  let url = api_path <> "/" <> id <> "?format=full"
-  case request.to(url) {
-    Error(_) -> {
-      wisp.log_error("Unable to construct request from url (aborting): " <> url)
-    }
-    Ok(req) -> {
-      let req =
-        req
-        |> request.set_method(http.Get)
-        |> request.set_header("authorization", "Bearer " <> ctx.token.access)
-      use <- rate_limiter.rate_limited(ctx.limiter, 5)
-      case hackney.send(req) {
-        Ok(resp) if resp.status == 200 -> {
-          case parser.parse_email(resp) {
-            Ok(#(updates, time)) -> {
-              // Check another worker hasn't finished it
-              // We shouldn't have simulatenous work, but lets be safe
-              use <- check_not_processed(id, ctx, fn() {
-                process.send(manager, Cancel(id))
-              })
-              // TODO: Do all database updates from this email in a single transaction
-              // Save works and updates to the database
-              case save_updates(ctx, updates, time) {
-                Ok(_) ->
-                  // Mark this email as processed so we don't try it again in the future
-                  case emails.insert_email(id, True, ctx.db) {
-                    Ok(_) -> process.send(manager, Finish(id))
-                    Error(e) -> {
-                      // If we've ended up here then the worst that might happen is that
-                      // we might someday reprocess the email and duplicate the updates
-                      wisp.log_warning(
-                        "Unable to mark email as processed: "
-                        <> string.inspect(e),
-                      )
-                      process.send(manager, Finish(id))
-                    }
-                  }
+  case gmail.get_email(ctx.token, ctx.limiter, id) {
+    Ok(resp) ->
+      case parser.parse_email(resp) {
+        Ok(#(updates, time)) -> {
+          // Check another worker hasn't finished it
+          // We shouldn't have simulatenous work, but lets be safe
+          use <- check_not_processed(id, ctx, fn() {
+            process.send(manager, Cancel(id))
+          })
+          // TODO: Do all database updates from this email in a single transaction
+          // Save works and updates to the database
+          case save_updates(ctx, updates, time) {
+            Ok(_) ->
+              // Mark this email as processed so we don't try it again in the future
+              case emails.insert_email(id, True, ctx.db) {
+                Ok(_) -> process.send(manager, Finish(id))
                 Error(e) -> {
-                  // Failure to save updates may be a temporary database issue
-                  // There's no harm in trying again
+                  // If we've ended up here then the worst that might happen is that
+                  // we might someday reprocess the email and duplicate the updates
                   wisp.log_warning(
-                    "Unable to save updates: " <> string.inspect(e),
+                    "Unable to mark email as processed: " <> string.inspect(e),
                   )
-                  process.send(manager, Restart(id, manager))
+                  process.send(manager, Finish(id))
                 }
               }
-            }
             Error(e) -> {
-              // If we can't parse the email then there's no point trying again
-              case e {
-                parser.ParseError(s) ->
-                  wisp.log_error("Unable to parse email:\n" <> s)
-                parser.BuilderError(s) ->
-                  wisp.log_error(
-                    "Unable to build email from parsed data: " <> s,
-                  )
-                parser.DecodeError(s) ->
-                  wisp.log_error(
-                    "Unable to decode email json: " <> string.inspect(s),
-                  )
-              }
-              process.send(manager, Abandon(id))
+              // Failure to save updates may be a temporary database issue
+              // There's no harm in trying again
+              wisp.log_warning("Unable to save updates: " <> string.inspect(e))
+              process.send(manager, Restart(id, manager))
             }
           }
         }
-        Ok(resp) if resp.status == 400 -> {
-          // If we've constructed a bad request there is no point in trying again
-          wisp.log_error(
-            "Gmail reports bad request: " <> string.inspect(resp.body),
-          )
+        Error(e) -> {
+          // If we can't parse the email then there's no point trying again
+          case e {
+            parser.ParseError(s) ->
+              wisp.log_error("Unable to parse email:\n" <> s)
+            parser.BuilderError(s) ->
+              wisp.log_error("Unable to build email from parsed data: " <> s)
+            parser.DecodeError(s) ->
+              wisp.log_error(
+                "Unable to decode email json: " <> string.inspect(s),
+              )
+          }
           process.send(manager, Abandon(id))
         }
-        Ok(resp) if resp.status == 401 -> {
-          // If one request is unauthorised, they all are
-          // Abort further mail processing
-          // TODO: Automate reauth?
-          wisp.log_warning("Gmail reports unauthorised")
-          process.send(manager, Die)
-        }
-        Ok(resp) if resp.status == 403 || resp.status == 429 -> {
-          // Handle rate limits by sleeping a bit before retrying
-          // Random sleep length is intended to spread requests
-          // If we have several failures close together
-          wisp.log_warning("Rate limit reached, sleeping")
-          process.sleep({ 15 + int.random(60) } * 1000)
-          process.send(manager, Restart(id, manager))
-        }
-        Ok(resp) if resp.status == 500 -> {
-          // If there's an internal issue with google we sleep
-          // but not as long as if we'd hit the rate limit
-          wisp.log_warning("Google had an internal error")
-          process.sleep({ 1 + int.random(5) } * 1000)
-          process.send(manager, Restart(id, manager))
-        }
-        Ok(resp) -> {
-          wisp.log_warning(
-            "Got unexpected status code "
-            <> int.to_string(resp.status)
-            <> " with body "
-            <> string.inspect(resp.body),
-          )
-        }
-        Error(e) -> {
-          // If we had an issue on our end retry the request
-          wisp.log_warning(
-            "Request for message "
-            <> id
-            <> "failed with error: "
-            <> string.inspect(e),
-          )
-          process.sleep(10 * 1000)
-          process.send(manager, Restart(id, manager))
-        }
       }
-      Nil
-    }
+    Error(_) -> process.send(manager, Abandon(id))
   }
 }
 
@@ -392,16 +325,6 @@ fn feed_maw(
   ctx: APIContext,
   page_id: Option(String),
 ) -> Nil {
-  let base_url =
-    api_path
-    <> "?q=from:do-not-reply%40archiveofourown.org&includeSpamTrash=false"
-    <> "&labelIds="
-    <> ctx.label
-  let url = case page_id {
-    Some(id) -> base_url <> "&pageToken=" <> id
-    None -> base_url
-  }
-
   let msg_decoder = {
     use id <- decode.field("id", decode.string)
     id |> decode.success
@@ -417,36 +340,21 @@ fn feed_maw(
     #(messages, next_page) |> decode.success
   }
 
-  use <- rate_limiter.rate_limited(ctx.limiter, 5)
-  case request.to(url) {
-    Ok(req) -> {
-      let resp =
-        request.set_header(req, "authorization", "Bearer " <> ctx.token.access)
-        |> hackney.send
-      case resp {
-        Ok(resp) -> {
-          case json.parse(resp.body, decoder) {
-            Ok(#(messages, next_page)) -> {
-              list.map(messages, fn(id) { process.send(maw, Queue(id, maw)) })
-              case next_page {
-                Some(next_page) -> feed_maw(maw, ctx, Some(next_page))
-                None -> wisp.log_info("All pages processed")
-              }
-            }
-            Error(e) ->
-              wisp.log_error(
-                "Unable to parse message list: " <> string.inspect(e),
-              )
+  case gmail.get_email_list(ctx.token, ctx.limiter, ctx.label, page_id) {
+    Ok(resp) ->
+      case json.parse(resp, decoder) {
+        Ok(#(messages, next_page)) -> {
+          list.map(messages, fn(id) { process.send(maw, Queue(id, maw)) })
+          case next_page {
+            Some(next_page) -> feed_maw(maw, ctx, Some(next_page))
+            None -> wisp.log_info("All pages processed")
           }
         }
         Error(e) ->
-          wisp.log_error("Message list request failed: " <> string.inspect(e))
+          wisp.log_error("Unable to parse message list: " <> string.inspect(e))
       }
-    }
-    Error(_) ->
-      wisp.log_error(
-        "Unable to construct request from list messages url: " <> url,
-      )
+    Error(e) ->
+      wisp.log_error("Message list request failed: " <> string.inspect(e))
   }
 }
 
