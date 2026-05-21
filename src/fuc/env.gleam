@@ -1,5 +1,5 @@
 import envoy
-import gleam/bit_array
+import fuc/file
 import gleam/bool
 import gleam/dict
 import gleam/list
@@ -26,7 +26,7 @@ pub fn get(environment: Environment, key: String) -> Result(String, Nil) {
 /// 
 /// TODO: Use a more structured format with proper parsing - JSON?
 pub fn load_env(from: String) -> Result(Environment, Nil) {
-  case read_file(from) {
+  case file.read(from) {
     Ok(envstr) ->
       string.split(envstr, "\n")
       |> list.map(string.trim)
@@ -94,17 +94,3 @@ fn unquote_value(value: String) -> String {
     False -> value
   }
 }
-
-fn read_file(filepath: String) -> Result(String, Nil) {
-  case read_file_bits(filepath) {
-    Ok(binary) ->
-      case bit_array.to_string(binary) {
-        Ok(str) -> Ok(str)
-        Error(_) -> Error(Nil)
-      }
-    Error(_) -> Error(Nil)
-  }
-}
-
-@external(erlang, "fuc_ffi", "read_file")
-fn read_file_bits(filepath: String) -> Result(BitArray, Nil)
