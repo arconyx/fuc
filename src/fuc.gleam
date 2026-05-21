@@ -1,4 +1,5 @@
 import envoy
+import fuc/context.{type Context}
 import fuc/database/oauth/state as oauth_state
 import fuc/database/oauth/tokens.{type OAuthToken}
 import fuc/database/unified.{type WorkWithUpdateCount}
@@ -6,7 +7,6 @@ import fuc/database/update.{type UpdateRow}
 import fuc/database/works.{type Work}
 import fuc/maw
 import fuc/rate_limiter
-import fuc/state.{type Context}
 import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/hackney
@@ -37,10 +37,10 @@ pub fn main() {
   logging.configure()
   logging.set_level(logging.Info)
 
-  let ctx = state.load_context()
+  let ctx = context.load_context()
   // There is no need for the secret key to be in the context
   let secret_key_base =
-    envoy.get("FUC_SECRET_KEY") |> result.replace_error(state.MissingVariable)
+    envoy.get("FUC_SECRET_KEY") |> result.replace_error(context.MissingVariable)
 
   case ctx, secret_key_base {
     Ok(ctx), Ok(secret_key_base) -> {
@@ -273,7 +273,7 @@ fn validate_state(
         case oauth_state.select_state_token(client, ctx.database_connection) {
           Some(st) -> {
             // We don't need to check that st.token == client == remote
-            // because it is enforced by state.select_state_token()
+            // because it is enforced by context.select_state_token()
             case timestamp.compare(now, st.expires_at) {
               order.Lt -> {
                 case
