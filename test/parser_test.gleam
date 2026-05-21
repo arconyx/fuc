@@ -1,6 +1,6 @@
+import fuc/file
 import fuc/parser
 import gleam/option.{None, Some}
-import simplifile
 
 const data_path = "./test/data/"
 
@@ -24,8 +24,7 @@ pub fn parse_updates_from_email_single_chapter_test() {
       None,
     )
 
-  let assert Ok(body) =
-    simplifile.read(data_path <> "email_body_single_chapter.txt")
+  let assert Ok(body) = file.read(data_path <> "email_body_single_chapter.txt")
 
   let assert Ok(updates) = parser.parse_updates_from_email(body)
 
@@ -54,7 +53,7 @@ pub fn parse_updates_from_email_single_chapter_two_test() {
     )
 
   let assert Ok(body) =
-    simplifile.read(data_path <> "email_body_single_chapter_two.txt")
+    file.read(data_path <> "email_body_single_chapter_two.txt")
 
   let assert Ok(updates) = parser.parse_updates_from_email(body)
 
@@ -82,7 +81,7 @@ pub fn parse_updates_from_email_single_chapter_three_test() {
     )
 
   let assert Ok(body) =
-    simplifile.read(data_path <> "email_body_single_chapter_three.txt")
+    file.read(data_path <> "email_body_single_chapter_three.txt")
 
   let assert Ok(updates) = parser.parse_updates_from_email(body)
 
@@ -110,9 +109,7 @@ pub fn parse_updates_from_email_single_chapter_with_chap_summary_test() {
     )
 
   let assert Ok(body) =
-    simplifile.read(
-      data_path <> "email_body_single_chapter_with_chap_summary.txt",
-    )
+    file.read(data_path <> "email_body_single_chapter_with_chap_summary.txt")
 
   let assert Ok(updates) = parser.parse_updates_from_email(body)
 
@@ -140,7 +137,7 @@ pub fn parse_updates_from_email_single_chapter_partial_one_test() {
     )
 
   let assert Ok(body) =
-    simplifile.read(data_path <> "email_body_single_chapter_partial_one.txt")
+    file.read(data_path <> "email_body_single_chapter_partial_one.txt")
 
   let assert Ok(updates) = parser.parse_updates_from_email(body)
 
@@ -168,7 +165,7 @@ pub fn parse_updates_from_email_single_chapter_partial_two_test() {
     )
 
   let assert Ok(body) =
-    simplifile.read(data_path <> "email_body_single_chapter_partial_two.txt")
+    file.read(data_path <> "email_body_single_chapter_partial_two.txt")
 
   let assert Ok(updates) = parser.parse_updates_from_email(body)
 
@@ -196,7 +193,7 @@ pub fn parse_updates_from_email_single_chapter_partial_three_test() {
     )
 
   let assert Ok(body) =
-    simplifile.read(data_path <> "email_body_single_chapter_partial_three.txt")
+    file.read(data_path <> "email_body_single_chapter_partial_three.txt")
 
   let assert Ok(updates) = parser.parse_updates_from_email(body)
 
@@ -224,7 +221,7 @@ pub fn parse_updates_from_email_single_chapter_partial_four_test() {
     )
 
   let assert Ok(body) =
-    simplifile.read(data_path <> "email_body_single_chapter_partial_four.txt")
+    file.read(data_path <> "email_body_single_chapter_partial_four.txt")
 
   let assert Ok(updates) = parser.parse_updates_from_email(body)
 
@@ -242,7 +239,7 @@ pub fn parse_updates_from_email_single_chapter_sparse_test() {
     )
 
   let assert Ok(body) =
-    simplifile.read(data_path <> "email_body_single_chapter_sparse.txt")
+    file.read(data_path <> "email_body_single_chapter_sparse.txt")
 
   let assert Ok(updates) = parser.parse_updates_from_email(body)
 
@@ -260,7 +257,7 @@ pub fn parse_updates_from_email_single_chapter_sparse_two_test() {
     )
 
   let assert Ok(body) =
-    simplifile.read(data_path <> "email_body_single_chapter_sparse_two.txt")
+    file.read(data_path <> "email_body_single_chapter_sparse_two.txt")
 
   let assert Ok(updates) = parser.parse_updates_from_email(body)
 
@@ -307,7 +304,7 @@ pub fn parse_updates_from_email_multiple_test() {
       None,
     )
 
-  let assert Ok(body) = simplifile.read(data_path <> "email_body_multiple.txt")
+  let assert Ok(body) = file.read(data_path <> "email_body_multiple.txt")
 
   let assert Ok([update1, update2, update3]) =
     parser.parse_updates_from_email(body)
@@ -330,7 +327,7 @@ pub fn parse_updates_from_email_new_work_test() {
       Some("Arbitary test summary."),
     ))
 
-  let assert Ok(body) = simplifile.read(data_path <> "email_body_new_work.txt")
+  let assert Ok(body) = file.read(data_path <> "email_body_new_work.txt")
 
   let assert Ok(updates) = parser.parse_updates_from_email(body)
 
