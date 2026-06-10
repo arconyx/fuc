@@ -1,23 +1,28 @@
-name: test
+name: "Build with nix"
 
 on:
   push:
-    branches:
-      - master
-      - main
-  pull_request:
+
+permissions:
+  contents: read
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      matrix:
+        # I would like if there was a ubuntu-latest-arm but alas
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: erlef/setup-beam@v1
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      - uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569
         with:
-          otp-version: "28.5.0.1"
-          gleam-version: "1.16.0"
-          rebar3-version: "3"
-          # elixir-version: "1"
-      - run: gleam deps download
-      - run: gleam test
-      - run: gleam format --check src test
+          # Cache key has been ordered with the value likely to change most frequently at the end
+          # So that we can fallback by matching on prefixes
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}-${{ hashFiles('**/Cargo.lock') }}
+          # If there's no cache hit, restore a cache by one of these prefixes
+          restore-prefixes-first-match: |
+            nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}-
+            nix-${{ runner.os }}-
+      - run: nix build -L
