@@ -33,6 +33,11 @@
       '';
       example = "/etc/fuc/creds.env";
     };
+    package = lib.mkOption {
+      type = lib.types.package;
+      default = pkgs.callPackage ./package.nix { };
+      description = "Fuc package";
+    };
   };
 
   config =
@@ -41,61 +46,57 @@
       internal_port = "8000";
     in
     lib.mkIf cfg.enable {
-      systemd.services =
-        let
-          fuc = pkgs.callPackage ./package.nix { };
-        in
-        {
-          fuc = {
-            enable = true;
-            description = "Fic update collator";
-            requires = [ "network-online.target" ];
-            after = [ "network-online.target" ];
-            path = [ pkgs.systemd ];
+      systemd.services = {
+        fuc = {
+          enable = true;
+          description = "Fic update collator";
+          requires = [ "network-online.target" ];
+          after = [ "network-online.target" ];
+          path = [ pkgs.systemd ];
 
-            confinement.enable = true;
+          confinement.enable = true;
 
-            unitConfig.StopWhenUnneeded = true;
+          unitConfig.StopWhenUnneeded = true;
 
-            serviceConfig = {
-              Type = "notify";
-              NotifyAccess = "all";
+          serviceConfig = {
+            Type = "notify";
+            NotifyAccess = "all";
 
-              ExecStart = "${fuc}/bin/fuc";
+            ExecStart = "${cfg.package}/bin/fuc";
 
-              DynamicUser = true;
-              CapabilityBoundingSet = "";
-              StateDirectory = "fuc";
-              LoadCredential = "fuc.env:${cfg.credentialsFile}";
-            };
-
-            environment = {
-              FUC_ADDRESS = cfg.address;
-              FUC_PORT = internal_port;
-              # Don't need FUC_DATABASE_PATH because we have special systemd handling to read STATE_DIRECTORY
-            };
+            DynamicUser = true;
+            CapabilityBoundingSet = "";
+            StateDirectory = "fuc";
+            LoadCredential = "fuc.env:${cfg.credentialsFile}";
           };
 
-          proxy-fuc = {
-            enable = true;
-            description = "Socket activation proxy for the Fic Update Collator";
-            requires = [
-              "fuc.service"
-              "proxy-fuc.socket"
-            ];
-            after = [
-              "fuc.service"
-              "proxy-fuc.socket"
-            ];
-
-            serviceConfig = {
-              Type = "notify";
-              ExecStart = "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd 127.0.0.1:${internal_port} --exit-idle-time 600";
-              PrivateTmp = true;
-            };
+          environment = {
+            FUC_ADDRESS = cfg.address;
+            FUC_PORT = internal_port;
+            # Don't need FUC_DATABASE_PATH because we have special systemd handling to read STATE_DIRECTORY
           };
-
         };
+
+        proxy-fuc = {
+          enable = true;
+          description = "Socket activation proxy for the Fic Update Collator";
+          requires = [
+            "fuc.service"
+            "proxy-fuc.socket"
+          ];
+          after = [
+            "fuc.service"
+            "proxy-fuc.socket"
+          ];
+
+          serviceConfig = {
+            Type = "notify";
+            ExecStart = "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd 127.0.0.1:${internal_port} --exit-idle-time 600";
+            PrivateTmp = true;
+          };
+        };
+
+      };
 
       systemd.sockets.proxy-fuc = {
         enable = true;
