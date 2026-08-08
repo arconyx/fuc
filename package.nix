@@ -4,19 +4,17 @@
   gleam,
   beamMinimalPackages,
   makeWrapper,
+  pkgsBuildHost,
 }:
 let
-  inherit (beamMinimalPackages)
-    rebar3WithPlugins
-    fetchHex
-    ;
+  beamHost = pkgsBuildHost.beamMinimalPackages;
 
   project = lib.importTOML ./gleam.toml;
   manifest = lib.importTOML ./manifest.toml;
 
   depToHex =
     a:
-    fetchHex {
+    beamHost.fetchHex {
       pkg = a.name;
       version = a.version;
       sha256 = a.outer_checksum;
@@ -42,8 +40,8 @@ stdenv.mkDerivation {
     gleam
     erlang
     makeWrapper
-    (rebar3WithPlugins {
-      plugins = with beamMinimalPackages; [ pc ];
+    (beamHost.rebar3WithPlugins {
+      plugins = with beamHost; [ pc ];
     })
   ];
 
@@ -99,7 +97,7 @@ stdenv.mkDerivation {
     cp -r build/erlang-shipment $out/gleam/${project.name}
     makeWrapper $out/gleam/${project.name}/entrypoint.sh $out/bin/${project.name} \
     --add-flags run \
-    --prefix PATH : ${beamMinimalPackages.erlang}/bin
+    --prefix PATH : ${erlang}/bin
 
     runHook postInstall
   '';
