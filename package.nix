@@ -24,7 +24,7 @@ let
 
   pkgs-toml = ''
     [packages]
-    ${lib.concatLines (builtins.map (p: ''${p.name} = "${p.version}"'') manifest.packages)}
+    ${lib.concatLines (map (p: ''${p.name} = "${p.version}"'') manifest.packages)}
   '';
 
   erlang = beamMinimalPackages.erlang;
@@ -65,7 +65,7 @@ stdenv.mkDerivation {
     EOF
   ''
   + lib.concatLines (
-    builtins.map (
+    map (
       a: "cp -r --no-preserve=mode --dereference ${depToHex a} build/packages/${a.name}"
     ) manifest.packages
   )

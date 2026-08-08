@@ -101,7 +101,7 @@
       systemd.sockets.proxy-fuc = {
         enable = true;
         description = "Public socket for the Fic Update Collator";
-        listenStreams = [ "127.0.0.1:${builtins.toString cfg.port}" ];
+        listenStreams = [ "127.0.0.1:${toString cfg.port}" ];
         wantedBy = [ "sockets.target" ];
       };
     };
