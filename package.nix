@@ -76,8 +76,11 @@ stdenv.mkDerivation {
     runHook preBuild
 
     export REBAR_CACHE_DIR="$TMP/rebar-cache"
+    # We use `fd` here because the library is versioned so the folder is namedsomething like `erl_interface-5.7/lib/`
+    # If no results are found then we we will be setting it to /lib, which should not exist.
+    export ERL_EI_LIBDIR="$(${lib.getExe pkgsBuildHost.fd} erl_interface ${erlang}/lib/erlang/lib --type directory --absolute-path --max-results 1)/lib"
     gleam export erlang-shipment
-          
+
     runHook postBuild
   '';
 
