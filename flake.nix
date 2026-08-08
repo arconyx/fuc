@@ -6,7 +6,7 @@
     let
       lib = nixpkgs.lib;
       forEachSystem =
-        f: lib.genAttrs lib.systems.flakeExposed (system: f nixpkgs.legacyPackages.${system});
+        f: lib.genAttrs [ "aarch64-linux" "x86_64-linux" ] (system: f nixpkgs.legacyPackages.${system});
     in
     {
       devShells = forEachSystem (pkgs: {
