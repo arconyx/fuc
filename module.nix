@@ -67,7 +67,10 @@
           after = [ "network-online.target" ];
           path = [ pkgs.systemd ];
 
-          confinement.enable = true;
+          confinement = {
+            enable = true;
+            packages = [ pkgs.systemd ];
+          };
 
           unitConfig.StopWhenUnneeded = true;
 
