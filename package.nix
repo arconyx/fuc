@@ -5,6 +5,7 @@
   beamMinimalPackages,
   makeWrapper,
   pkgsBuildHost,
+  coreutils,
 }:
 let
   beamHost = pkgsBuildHost.beamMinimalPackages;
@@ -100,7 +101,12 @@ stdenv.mkDerivation {
     cp -r build/erlang-shipment $out/gleam/${project.name}
     makeWrapper $out/gleam/${project.name}/entrypoint.sh $out/bin/${project.name} \
     --add-flags run \
-    --prefix PATH : ${erlang}/bin
+    --prefix PATH : ${
+      lib.makeBinPath [
+        erlang
+        coreutils
+      ]
+    }
 
     runHook postInstall
   '';
