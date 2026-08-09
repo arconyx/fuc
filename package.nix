@@ -6,6 +6,7 @@
   makeWrapper,
   pkgsBuildHost,
   coreutils,
+  fd,
 }:
 let
   beamHost = pkgsBuildHost.beamMinimalPackages;
@@ -25,8 +26,6 @@ let
     [packages]
     ${lib.concatLines (map (p: ''${p.name} = "${p.version}"'') manifest.packages)}
   '';
-
-  erlang = beamMinimalPackages.erlang;
 in
 stdenv.mkDerivation {
   pname = project.name;
@@ -37,19 +36,21 @@ stdenv.mkDerivation {
     name = project.name;
   };
 
+  strictDeps = true;
+
   nativeBuildInputs = [
     gleam
-    erlang
+    beamHost.erlang
     makeWrapper
     (beamHost.rebar3WithPlugins {
-      plugins = with beamHost; [ pc ];
+      plugins = [ beamHost.pc ];
     })
   ];
 
   # We don't strictly need this here but it is semantically correct
   # to include it
   buildInputs = [
-    erlang
+    beamMinimalPackages.erlang
   ];
 
   configurePhase = ''
@@ -79,7 +80,7 @@ stdenv.mkDerivation {
     export REBAR_CACHE_DIR="$TMP/rebar-cache"
     # We use `fd` here because the library is versioned so the folder is namedsomething like `erl_interface-5.7/lib/`
     # If no results are found then we we will be setting it to /lib, which should not exist.
-    export ERL_EI_LIBDIR="$(${lib.getExe pkgsBuildHost.fd} erl_interface ${erlang}/lib/erlang/lib --type directory --absolute-path --max-results 1)/lib"
+    export ERL_EI_LIBDIR="$(${lib.getExe fd} erl_interface ${beamMinimalPackages.erlang}/lib/erlang/lib --type directory --absolute-path --max-results 1)/lib"
     gleam export erlang-shipment
 
     runHook postBuild
@@ -103,7 +104,7 @@ stdenv.mkDerivation {
     --add-flags run \
     --prefix PATH : ${
       lib.makeBinPath [
-        erlang
+        beamMinimalPackages.erlang
         coreutils
       ]
     }
