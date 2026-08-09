@@ -1,4 +1,3 @@
-import envoy
 import fuc/context.{type Context}
 import fuc/database/oauth/state as oauth_state
 import fuc/database/oauth/tokens.{type OAuthToken}
@@ -37,13 +36,10 @@ pub fn main() {
   logging.configure()
   logging.set_level(logging.Info)
 
-  let ctx = context.load_context()
-  // There is no need for the secret key to be in the context
-  let secret_key_base =
-    envoy.get("FUC_SECRET_KEY") |> result.replace_error(context.MissingVariable)
+  let config = context.load_context()
 
-  case ctx, secret_key_base {
-    Ok(ctx), Ok(secret_key_base) -> {
+  case config {
+    Ok(#(ctx, secret_key_base)) -> {
       // Using a let assert because it simplifies the logic and we
       // *want* to panic if it fails
       let assert Ok(_) = rate_limiter.start_rate_limiter(ctx.rate_limiter)
@@ -68,19 +64,8 @@ pub fn main() {
         }
       }
     }
-    Error(e), Ok(_) -> {
-      wisp.log_critical("Unable to load context: " <> string.inspect(e))
-    }
-    Ok(_), Error(e) -> {
-      wisp.log_critical("Unable to load secret key base: " <> string.inspect(e))
-    }
-    Error(e_ctx), Error(e_sk) -> {
-      wisp.log_critical(
-        "Unable to load context or secret key.\nContext error: "
-        <> string.inspect(e_ctx)
-        <> "\nSecret key error: "
-        <> string.inspect(e_sk),
-      )
+    Error(e) -> {
+      wisp.log_critical("Unable to load configuration: " <> string.inspect(e))
     }
   }
 

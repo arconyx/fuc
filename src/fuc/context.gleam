@@ -51,7 +51,7 @@ pub type OAuthClient {
 /// Init context, loading information from environment variables
 /// This calls create_database because it should be an error to have
 /// a context with an invalid database referenced.
-pub fn load_context() -> Result(Context, ContextError) {
+pub fn load_context() -> Result(#(Context, String), ContextError) {
   // First load environment variables from systemd credentials, if present.
   let env = env.load_env_from_systemd()
 
@@ -61,6 +61,8 @@ pub fn load_context() -> Result(Context, ContextError) {
       Error(_) -> MissingVariable(key) |> Error
     }
   }
+
+  use secret_key <- result.try(get("FUC_SECRET_KEY"))
 
   use id <- result.try(get("FUC_OAUTH_CLIENT_ID"))
   use secret <- result.try(get("FUC_OAUTH_CLIENT_SECRET"))
@@ -111,14 +113,19 @@ pub fn load_context() -> Result(Context, ContextError) {
 
   use ao3_label <- result.try(get("FUC_AO3_LABEL"))
 
-  Context(
-    oauth_client:,
-    address:,
-    port:,
-    database_connection:,
-    ao3_label:,
-    rate_limiter: process.new_name("rate_limiter"),
-    maw: process.new_name("maw"),
+  // There is no need for the secret key to be in the context so we pass it
+  // separately
+  #(
+    Context(
+      oauth_client:,
+      address:,
+      port:,
+      database_connection:,
+      ao3_label:,
+      rate_limiter: process.new_name("rate_limiter"),
+      maw: process.new_name("maw"),
+    ),
+    secret_key,
   )
   |> Ok
 }
