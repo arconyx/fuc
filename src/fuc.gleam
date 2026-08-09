@@ -1,3 +1,4 @@
+import envoy
 import fuc/context.{type Context}
 import fuc/database/oauth/state as oauth_state
 import fuc/database/oauth/tokens.{type OAuthToken}
@@ -34,7 +35,8 @@ import wisp/wisp_mist
 /// Starts server
 pub fn main() {
   logging.configure()
-  logging.set_level(logging.Info)
+  get_log_level()
+  |> logging.set_level()
 
   let config = context.load_context()
 
@@ -77,6 +79,26 @@ pub fn main() {
 
 @external(erlang, "fuc_ffi", "notify_ready")
 fn notify_ready() -> String
+
+fn get_log_level() -> logging.LogLevel {
+  case envoy.get("FUC_LOG_LEVEL") {
+    Ok(level) ->
+      case string.lowercase(level) {
+        "debug" -> logging.Debug
+        "info" -> logging.Info
+        "notice" -> logging.Notice
+        "warning" | "warn" -> logging.Warning
+        "error" -> logging.Error
+        "critical" -> logging.Critical
+        // If the variable is set but we can't pass it fall
+        // back to logging everything. This means things like
+        // FUC_LOG_LEVEL=1 or =all work.
+        _ -> logging.Debug
+      }
+    // If the variable is unset then just go for the info logging
+    Error(_) -> logging.Info
+  }
+}
 
 // /////////// REQUEST HANDLING ///////////////
 

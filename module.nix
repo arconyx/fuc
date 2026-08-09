@@ -38,6 +38,19 @@
       default = pkgs.callPackage ./package.nix { };
       description = "Fuc package";
     };
+    logLevel = lib.mkOption {
+      type = lib.types.enum [
+        "debug"
+        "info"
+        "notice"
+        "warning"
+        "error"
+        "critical"
+      ];
+      description = "Minimum log level";
+      example = "debug";
+      default = "info";
+    };
   };
 
   config =
@@ -73,6 +86,7 @@
           environment = {
             FUC_ADDRESS = cfg.address;
             FUC_PORT = internal_port;
+            FUC_LOG_LEVEL = cfg.logLevel;
             # Don't need FUC_DATABASE_PATH because we have special systemd handling to read STATE_DIRECTORY
           };
         };
