@@ -55,7 +55,8 @@ pub fn main() {
         Ok(_) -> {
           // Notify systemd watchdog
           // This is a noop if we aren't running under systemd
-          notify_ready()
+          let ready = notify_ready()
+          wisp.log_debug("Sent systemd ready with response:\n" <> ready)
           // Keep main process alive
           process.sleep_forever()
         }
@@ -75,7 +76,7 @@ pub fn main() {
 }
 
 @external(erlang, "fuc_ffi", "notify_ready")
-fn notify_ready() -> Nil
+fn notify_ready() -> String
 
 // /////////// REQUEST HANDLING ///////////////
 

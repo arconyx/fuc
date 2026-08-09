@@ -3,7 +3,7 @@
 -export([notify_ready/0, read_file/1]).
 
 notify_ready() ->
-    os:cmd("systemd-notify --ready").
+    unicode:characters_to_binary(os:cmd("systemd-notify --ready")).
 
 read_file(Filepath) ->
     case file:read_file(Filepath, [raw]) of
