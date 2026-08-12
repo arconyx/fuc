@@ -77,6 +77,7 @@
           serviceConfig = {
             Type = "notify";
             NotifyAccess = "all";
+            WatchdogSec = 5;
 
             ExecStart = "${cfg.package}/bin/fuc";
 

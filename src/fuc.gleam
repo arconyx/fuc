@@ -1,3 +1,4 @@
+import daemonic
 import envoy
 import fuc/context.{type Context}
 import fuc/database/oauth/state as oauth_state
@@ -17,6 +18,8 @@ import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/order
+import gleam/otp/static_supervisor
+import gleam/otp/supervision
 import gleam/result
 import gleam/string
 import gleam/string_tree.{type StringTree}
@@ -38,28 +41,35 @@ pub fn main() {
   get_log_level()
   |> logging.set_level()
 
+  let daemon = daemonic.configure()
+
   let config = context.load_context()
 
   case config {
     Ok(#(ctx, secret_key_base)) -> {
-      // Using a let assert because it simplifies the logic and we
-      // *want* to panic if it fails
-      let assert Ok(_) = rate_limiter.start_rate_limiter(ctx.rate_limiter)
       let server =
         route_request(_, ctx)
         |> wisp_mist.handler(secret_key_base)
         |> mist.new()
         |> mist.bind("localhost")
         |> mist.port(ctx.port)
-        |> mist.start()
+        |> mist.supervised()
 
-      case server {
+      let limiter =
+        supervision.worker(fn() {
+          rate_limiter.start_rate_limiter(ctx.rate_limiter)
+        })
+
+      let sup =
+        static_supervisor.new(static_supervisor.OneForOne)
+        |> daemonic.add_watchdog(daemon)
+        |> static_supervisor.add(server)
+        |> static_supervisor.add(limiter)
+        |> static_supervisor.start()
+
+      case sup {
         Ok(_) -> {
-          // Notify systemd watchdog
-          // This is a noop if we aren't running under systemd
-          let ready = notify_ready()
-          wisp.log_debug("Sent systemd ready with response:\n" <> ready)
-          // Keep main process alive
+          daemonic.ready_daemon(daemon)
           process.sleep_forever()
         }
         Error(e) -> {
@@ -76,9 +86,6 @@ pub fn main() {
   process.sleep(500)
   // give logging a chance to finish
 }
-
-@external(erlang, "fuc_ffi", "notify_ready")
-fn notify_ready() -> String
 
 fn get_log_level() -> logging.LogLevel {
   case envoy.get("FUC_LOG_LEVEL") {

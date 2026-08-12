@@ -1,9 +1,6 @@
 -module(fuc_ffi).
 
--export([notify_ready/0, read_file/1]).
-
-notify_ready() ->
-    unicode:characters_to_binary(os:cmd("systemd-notify --ready")).
+-export([read_file/1]).
 
 read_file(Filepath) ->
     case file:read_file(Filepath, [raw]) of

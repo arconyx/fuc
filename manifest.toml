@@ -5,6 +5,7 @@ packages = [
   { name = "cake", version = "3.0.0", build_tools = ["gleam"], requirements = ["gleam_stdlib", "gleam_time"], otp_app = "cake", source = "hex", outer_checksum = "F88E05493452E091F8CEC99F23B7CCE70F2F9D2E7A7828C158E9E7CDD42732A6" },
   { name = "cake_sqlight", version = "1.4.0", build_tools = ["gleam"], requirements = ["cake", "gleam_stdlib", "gleam_time", "sqlight"], otp_app = "cake_sqlight", source = "hex", outer_checksum = "F6609EAA633950EA5FBFB612CD19A2774040DEDFB4CB68F99B193E8C3BEF5BED" },
   { name = "certifi", version = "2.15.0", build_tools = ["rebar3"], requirements = [], otp_app = "certifi", source = "hex", outer_checksum = "B147ED22CE71D72EAFDAD94F055165C1C182F61A2FF49DF28BCC71D1D5B94A60" },
+  { name = "daemonic", version = "0.1.0", build_tools = ["gleam"], requirements = ["envoy", "gleam_erlang", "gleam_otp", "gleam_stdlib"], source = "git", repo = "https://github.com/arconyx/daemonic.git", commit = "2d48d70d539b0b0e372d554b4eeba35600888e49" },
   { name = "directories", version = "1.2.0", build_tools = ["gleam"], requirements = ["envoy", "gleam_stdlib", "platform", "simplifile"], otp_app = "directories", source = "hex", outer_checksum = "D13090CFCDF6759B87217E8DDD73A75903A700148A82C1D33799F333E249BF9E" },
   { name = "envoy", version = "1.2.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "envoy", source = "hex", outer_checksum = "9C6FBB6BFA02A52798BEEC5977A738CAD6E4A057F4B67FD0C8061AD2502C191A" },
   { name = "esqlite", version = "0.9.0", build_tools = ["rebar3"], requirements = [], otp_app = "esqlite", source = "hex", outer_checksum = "CCF72258A4EE152EC7AD92AA9A03552EB6CA1B06B65C93AD5B6E55C302E05855" },
@@ -43,6 +44,7 @@ packages = [
 [requirements]
 cake = { version = ">= 3.0.0 and < 4.0.0" }
 cake_sqlight = { version = ">= 1.4.0 and < 2.0.0" }
+daemonic = { git = "https://github.com/arconyx/daemonic.git", ref = "main" }
 envoy = { version = ">= 1.2.0 and < 2.0.0" }
 gleam_erlang = { version = ">= 1.2.0 and < 2.0.0" }
 gleam_hackney = { version = ">= 1.3.1 and < 2.0.0" }
