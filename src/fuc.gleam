@@ -53,7 +53,6 @@ pub fn main() {
         |> mist.new()
         |> mist.bind("localhost")
         |> mist.port(ctx.port)
-        |> mist.with_ipv6()
         |> mist.supervised()
 
       let limiter =
