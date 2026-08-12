@@ -16,13 +16,5 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
       - uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3
-      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569
-        with:
-          # Cache key has been ordered with the value likely to change most frequently at the end
-          # So that we can fallback by matching on prefixes
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}-${{ hashFiles('**/Cargo.lock') }}
-          # If there's no cache hit, restore a cache by one of these prefixes
-          restore-prefixes-first-match: |
-            nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}-
-            nix-${{ runner.os }}-
+      # We don't use a store cache so as to catch hash mismatches in the Gleam deps
       - run: nix build -L

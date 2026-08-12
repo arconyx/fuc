@@ -7,27 +7,63 @@
   pkgsBuildHost,
   coreutils,
   fd,
+  git,
+  cacert,
 }:
 let
   beamHost = pkgsBuildHost.beamMinimalPackages;
-
   project = lib.importTOML ./gleam.toml;
-  manifest = lib.importTOML ./manifest.toml;
 
-  depToHex =
-    a:
-    beamHost.fetchHex {
-      pkg = a.name;
-      version = a.version;
-      sha256 = a.outer_checksum;
+  mkGleamDeps =
+    name: src: hash:
+    stdenv.mkDerivation {
+      name = "${name}-gleam-deps";
+
+      nativeBuildInputs = [
+        gleam
+        git
+        cacert
+      ];
+
+      src = src;
+
+      dontPatchShebangs = true;
+
+      buildPhase = ''
+        runHook preBuild
+
+        # gleam deps download fails if it can't write to $HOME/.cache
+        mkdir fake_home
+        HOME=fake_home
+
+        gleam deps download
+
+        # packages.toml is randomly ordered with a header row
+        awk 'NR == 1; NR > 1 {print $0 | "sort -n"}' build/packages/packages.toml > packages_sorted.toml
+        cp packages_sorted.toml build/packages/packages.toml
+
+        rm build/packages/gleam.lock
+        # git dirs apparently break the fod
+        rm -r build/packages/daemonic/.git
+
+        runHook postBuild
+      '';
+
+      installPhase = ''
+        runHook preInstall
+
+        mkdir $out
+        cp -r build/packages/** $out
+
+        runHook postInstall
+      '';
+
+      outputHashMode = "recursive";
+      outputHashAlgo = if hash == "" then "sha256" else null;
+      outputHash = hash;
     };
-
-  pkgs-toml = ''
-    [packages]
-    ${lib.concatLines (map (p: ''${p.name} = "${p.version}"'') manifest.packages)}
-  '';
 in
-stdenv.mkDerivation {
+stdenv.mkDerivation (finalAttrs: {
   pname = project.name;
   version = project.version;
 
@@ -35,6 +71,11 @@ stdenv.mkDerivation {
     path = ./.;
     name = project.name;
   };
+
+  gleamDeps =
+    mkGleamDeps "${finalAttrs.pname}-${finalAttrs.version}" finalAttrs.src
+      finalAttrs.gleamDepsHash;
+  gleamDepsHash = "sha256-7BzJaZ+B0v7EpPJB6NcGM7m08qq766czLVxqsPQAuSc=";
 
   strictDeps = true;
 
@@ -53,34 +94,19 @@ stdenv.mkDerivation {
     beamMinimalPackages.erlang
   ];
 
-  configurePhase = ''
-    runHook preConfigure
-
-    mkdir -p build/packages
-
-    cat <<EOF > build/packages/packages.toml
-  ''
-  + pkgs-toml
-  + ''
-    EOF
-  ''
-  + lib.concatLines (
-    map (
-      a: "cp -r --no-preserve=mode --dereference ${depToHex a} build/packages/${a.name}"
-    ) manifest.packages
-  )
-  + ''
-
-    runHook postConfigure
-  '';
-
   buildPhase = ''
     runHook preBuild
+
+    mkdir -p build/packages
+    # gleam expects to be able to write to build/packages so we copy and chmod
+    cp -r ${finalAttrs.gleamDeps}/** build/packages
+    chmod -R u+w build/packages
 
     export REBAR_CACHE_DIR="$TMP/rebar-cache"
     # We use `fd` here because the library is versioned so the folder is namedsomething like `erl_interface-5.7/lib/`
     # If no results are found then we we will be setting it to /lib, which should not exist.
     export ERL_EI_LIBDIR="$(${lib.getExe fd} erl_interface ${beamMinimalPackages.erlang}/lib/erlang/lib --type directory --absolute-path --max-results 1)/lib"
+
     gleam export erlang-shipment
 
     runHook postBuild
@@ -112,4 +138,4 @@ stdenv.mkDerivation {
     runHook postInstall
   '';
 
-}
+})
