@@ -9,6 +9,7 @@
   fd,
   git,
   cacert,
+  toml-sort,
 }:
 let
   beamHost = pkgsBuildHost.beamMinimalPackages;
@@ -23,6 +24,8 @@ let
         gleam
         git
         cacert
+        toml-sort
+        fd
       ];
 
       src = src;
@@ -39,12 +42,11 @@ let
         gleam deps download
 
         # packages.toml is randomly ordered with a header row
-        awk 'NR == 1; NR > 1 {print $0 | "sort -n"}' build/packages/packages.toml > packages_sorted.toml
-        cp packages_sorted.toml build/packages/packages.toml
+        toml-sort --all --no-comments --in-place build/packages/packages.toml
 
         rm build/packages/gleam.lock
-        # git dirs apparently break the fod
-        rm -r build/packages/daemonic/.git
+        # .git dir is full of non-determinism and also forbidden store paths
+        fd '^.git$' build/packages/ --exact-depth 2 --type directory --hidden --absolute-path --exec-batch rm  --recursive --verbose
 
         runHook postBuild
       '';
@@ -75,7 +77,7 @@ stdenv.mkDerivation (finalAttrs: {
   gleamDeps =
     mkGleamDeps "${finalAttrs.pname}-${finalAttrs.version}" finalAttrs.src
       finalAttrs.gleamDepsHash;
-  gleamDepsHash = "sha256-7BzJaZ+B0v7EpPJB6NcGM7m08qq766czLVxqsPQAuSc=";
+  gleamDepsHash = "sha256-fd0sqh7ya6PTP9npAm/Degcbgq0u1Tww+yJt1mNZ5Eo=";
 
   strictDeps = true;
 
@@ -86,6 +88,7 @@ stdenv.mkDerivation (finalAttrs: {
     (beamHost.rebar3WithPlugins {
       plugins = [ beamHost.pc ];
     })
+    fd
   ];
 
   # We don't strictly need this here but it is semantically correct
@@ -105,7 +108,7 @@ stdenv.mkDerivation (finalAttrs: {
     export REBAR_CACHE_DIR="$TMP/rebar-cache"
     # We use `fd` here because the library is versioned so the folder is namedsomething like `erl_interface-5.7/lib/`
     # If no results are found then we we will be setting it to /lib, which should not exist.
-    export ERL_EI_LIBDIR="$(${lib.getExe fd} erl_interface ${beamMinimalPackages.erlang}/lib/erlang/lib --type directory --absolute-path --max-results 1)/lib"
+    export ERL_EI_LIBDIR="$(fd erl_interface ${beamMinimalPackages.erlang}/lib/erlang/lib --type directory --absolute-path --max-results 1)/lib"
 
     gleam export erlang-shipment
 
