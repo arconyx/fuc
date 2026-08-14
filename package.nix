@@ -83,18 +83,20 @@ stdenv.mkDerivation (finalAttrs: {
 
   nativeBuildInputs = [
     gleam
+
     beamHost.erlang
-    makeWrapper
     (beamHost.rebar3WithPlugins {
       plugins = [ beamHost.pc ];
     })
+
     fd
+    makeWrapper
   ];
 
-  # We don't strictly need this here but it is semantically correct
-  # to include it
   buildInputs = [
     beamMinimalPackages.erlang
+    # erlang shipment invokes dirname
+    coreutils
   ];
 
   buildPhase = ''
