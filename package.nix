@@ -108,9 +108,19 @@ stdenv.mkDerivation (finalAttrs: {
     chmod -R u+w build/packages
 
     REBAR_CACHE_DIR="$TMP/rebar-cache"
-    # We use `fd` here because the library is versioned so the folder is namedsomething like `erl_interface-5.7/lib/`
+
+    # The port compiler (pc) plugin for rebar3 needs some special environment variables
+    # We use `fd` here because the library is versioned so the folder is named something like `erl_interface-5.7/lib/`
     # If no results are found then we we will be setting it to /lib, which should not exist.
-    ERL_EI_LIBDIR="$(fd erl_interface ${beamMinimalPackages.erlang}/lib/erlang/lib --type directory --absolute-path --max-results 1)/lib"
+    # Paths have a trailing slash so we don't need to include one when appending.
+    TMP_ERL_INTERFACE_DIR="$(fd '^erl_interface-' ${beamMinimalPackages.erlang}/lib/erlang/lib --type directory --absolute-path --max-results 1 --exact-depth 1)"
+    TMP_ERTS_DIR="$(fd '^erts-' ${beamMinimalPackages.erlang}/lib/erlang --type directory --absolute-path --max-results 1 --exact-depth 1)"
+    # Yes, export is required for rebar to pick them up
+    export ERL_EI_LIBDIR="$TMP_ERL_INTERFACE_DIRlib"
+    # Joining the strings like this makes the end of the env vars clear
+    # Using $($ENV_VAR) tries to evalutate $ENV_VAR
+    # Using curly brackets reads as Nix substitution
+    export ERL_CFLAGS="-I $TMP_ERL_INTERFACE_DIR""include -I $TMP_ERTS_DIR""include"
 
     gleam export erlang-shipment
 
