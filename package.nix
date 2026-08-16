@@ -80,6 +80,7 @@ stdenv.mkDerivation (finalAttrs: {
   gleamDepsHash = "sha256-fd0sqh7ya6PTP9npAm/Degcbgq0u1Tww+yJt1mNZ5Eo=";
 
   strictDeps = true;
+  __structuredAttrs = true;
 
   nativeBuildInputs = [
     gleam
@@ -152,5 +153,9 @@ stdenv.mkDerivation (finalAttrs: {
 
     runHook postInstall
   '';
+
+  outputChecks.out = {
+    disallowedRequisites = lib.optional (stdenv.buildPlatform != stdenv.hostPlatform) beamHost.erlang;
+  };
 
 })
