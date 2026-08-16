@@ -107,10 +107,10 @@ stdenv.mkDerivation (finalAttrs: {
     cp -r ${finalAttrs.gleamDeps}/** build/packages
     chmod -R u+w build/packages
 
-    export REBAR_CACHE_DIR="$TMP/rebar-cache"
+    REBAR_CACHE_DIR="$TMP/rebar-cache"
     # We use `fd` here because the library is versioned so the folder is namedsomething like `erl_interface-5.7/lib/`
     # If no results are found then we we will be setting it to /lib, which should not exist.
-    export ERL_EI_LIBDIR="$(fd erl_interface ${beamMinimalPackages.erlang}/lib/erlang/lib --type directory --absolute-path --max-results 1)/lib"
+    ERL_EI_LIBDIR="$(fd erl_interface ${beamMinimalPackages.erlang}/lib/erlang/lib --type directory --absolute-path --max-results 1)/lib"
 
     gleam export erlang-shipment
 
