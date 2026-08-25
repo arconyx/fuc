@@ -77,7 +77,7 @@ stdenv.mkDerivation (finalAttrs: {
   gleamDeps =
     mkGleamDeps "${finalAttrs.pname}-${finalAttrs.version}" finalAttrs.src
       finalAttrs.gleamDepsHash;
-  gleamDepsHash = "sha256-fd0sqh7ya6PTP9npAm/Degcbgq0u1Tww+yJt1mNZ5Eo=";
+  gleamDepsHash = "sha256-tQG2vdNBIwArJpnPU9WKkp9xlotPonm6DflfdTBhXpA=";
 
   strictDeps = true;
   __structuredAttrs = true;
