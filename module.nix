@@ -35,7 +35,7 @@
     };
     package = lib.mkOption {
       type = lib.types.package;
-      default = pkgs.callPackage ./package.nix { };
+      default = pkgs.beamMinimalPackages.callPackage ./package.nix { };
       description = "Fuc package";
     };
     logLevel = lib.mkOption {
