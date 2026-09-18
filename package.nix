@@ -130,6 +130,7 @@ stdenv.mkDerivation (finalAttrs: {
 
   # This recompiles the entire thing to run the tests, making it *slow*
   # Still, some tests beats no tests
+  doCheck = true;
   checkPhase = ''
     runHook preCheck
     gleam test
