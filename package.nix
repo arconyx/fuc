@@ -2,7 +2,7 @@
   stdenv,
   lib,
   gleam,
-  beamMinimalPackages,
+  erlang,
   makeWrapper,
   pkgsBuildHost,
   coreutils,
@@ -95,7 +95,7 @@ stdenv.mkDerivation (finalAttrs: {
   ];
 
   buildInputs = [
-    beamMinimalPackages.erlang
+    erlang
     # erlang shipment invokes dirname
     coreutils
   ];
@@ -114,8 +114,8 @@ stdenv.mkDerivation (finalAttrs: {
     # We use `fd` here because the library is versioned so the folder is named something like `erl_interface-5.7/lib/`
     # If no results are found then we we will be setting it to /lib, which should not exist.
     # Paths have a trailing slash so we don't need to include one when appending.
-    TMP_ERL_INTERFACE_DIR="$(fd '^erl_interface-' ${beamMinimalPackages.erlang}/lib/erlang/lib --type directory --absolute-path --max-results 1 --exact-depth 1)"
-    TMP_ERTS_DIR="$(fd '^erts-' ${beamMinimalPackages.erlang}/lib/erlang --type directory --absolute-path --max-results 1 --exact-depth 1)"
+    TMP_ERL_INTERFACE_DIR="$(fd '^erl_interface-' ${erlang}/lib/erlang/lib --type directory --absolute-path --max-results 1 --exact-depth 1)"
+    TMP_ERTS_DIR="$(fd '^erts-' ${erlang}/lib/erlang --type directory --absolute-path --max-results 1 --exact-depth 1)"
     # Yes, export is required for rebar to pick them up
     export ERL_EI_LIBDIR="$TMP_ERL_INTERFACE_DIRlib"
     # Joining the strings like this makes the end of the env vars clear
@@ -146,7 +146,7 @@ stdenv.mkDerivation (finalAttrs: {
     --add-flags run \
     --prefix PATH : ${
       lib.makeBinPath [
-        beamMinimalPackages.erlang
+        erlang
         coreutils
       ]
     }

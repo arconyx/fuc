@@ -20,7 +20,7 @@
         };
       });
       packages = forEachSystem (pkgs: {
-        default = pkgs.callPackage ./package.nix { };
+        default = pkgs.beamMinimalPackages.callPackage ./package.nix { };
       });
       nixosModules.default = {
         imports = [ ./module.nix ];
